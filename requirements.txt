@@ -1,0 +1,11 @@
+
+tkinter
+pillow
+opencv-python
+numpy
+psutil
+pynput
+sounddevice
+cryptography
+pywin32
+pyinstaller
