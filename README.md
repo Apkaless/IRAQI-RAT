@@ -38,7 +38,7 @@ The GUI supports multiple themes to provide a customizable user experience:
 ### Steps to Run
 1. Clone the repository:
    ```bash
-   git clone https://github.com/apkaless/IRAQI-RAT.git
+   git clone https://github.com/Apkaless/IRAQI-RAT.git
    cd IRAQI-RAT
    ```
 2. Install dependencies:
