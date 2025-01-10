@@ -28,7 +28,6 @@ clients = []
 names = []
 keyloggerToggle = False
 
-# Add these new themes to the THEMES dictionary
 THEMES = {
     "hacker": {
         "name": "Matrix",
