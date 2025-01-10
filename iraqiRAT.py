@@ -1641,8 +1641,6 @@ if __name__ == "__main__":
                             client_path
                         ]
                         os.system(" ".join(command))
-
-                        # Move the executable to the output path
                         exe_path = os.path.join(temp_dir, "dist", outputname)
                         if os.path.exists(exe_path):
                             shutil.move(exe_path, output_path)
@@ -1684,7 +1682,6 @@ if __name__ == "__main__":
             bg=self.colors["bg_dark"]
         ).pack(pady=20)
 
-        # Configuration frame
         config_frame = tk.Frame(
             main_frame,
             bg=self.colors["bg_dark"],
@@ -1693,7 +1690,6 @@ if __name__ == "__main__":
         )
         config_frame.pack(fill="x", padx=10, pady=10)
 
-        # Connection settings
         tk.Label(
             config_frame,
             text="Connection Settings",
@@ -1702,7 +1698,6 @@ if __name__ == "__main__":
             bg=self.colors["bg_dark"]
         ).pack(pady=10)
 
-        # IP Address
         tk.Label(
             config_frame,
             text="Server IP:",
@@ -1719,7 +1714,6 @@ if __name__ == "__main__":
         ip_entry.pack(pady=5)
         ip_entry.insert(0, socket.gethostbyname(socket.gethostname()))
 
-        # Port
         tk.Label(
             config_frame,
             text="Server Port:",
@@ -1736,7 +1730,6 @@ if __name__ == "__main__":
         port_entry.pack(pady=5)
         port_entry.insert(0, "4444")
 
-        # Additional options frame
         options_frame = tk.Frame(
             main_frame,
             bg=self.colors["bg_dark"],
@@ -1745,7 +1738,6 @@ if __name__ == "__main__":
         )
         options_frame.pack(fill="x", padx=10, pady=10)
 
-        # Persistence options
         tk.Label(
             options_frame,
             text="Additional Options",
