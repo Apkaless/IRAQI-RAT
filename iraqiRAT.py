@@ -366,7 +366,6 @@ THEMES = {
 
 
 def get_theme_style_config(theme_name):
-    """Get specific widget style configurations based on theme"""
     base_config = {
         "border_width": 1,
         "relief": "solid",
