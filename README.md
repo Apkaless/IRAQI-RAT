@@ -47,7 +47,7 @@ The GUI supports multiple themes to provide a customizable user experience:
    ```
 3. Run the server:
    ```bash
-   python iraqiRAT.py
+   python IRAQI_RAT.py
    ```
 
 ## Usage
