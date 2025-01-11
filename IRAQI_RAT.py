@@ -2577,7 +2577,6 @@ if __name__ == "__main__":
     
     root.mainloop()
     
-    # Cleanup
     for conn in conns:
         try:
             conn.close()
