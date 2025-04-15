@@ -180,18 +180,18 @@ class RemoteDesktopControl:
             if len(parts) < 2:
                 print(f"[!] Invalid command format: {command}")
                 return "ERROR: Invalid command format"
-                
+        
             cmd_type = parts[0]
-            
+
             if cmd_type == "MOUSE_MOVE":
                 # Format: MOUSE_MOVE|rel_x|rel_y
                 if len(parts) < 3:
                     return "ERROR: Invalid MOUSE_MOVE command"
                     
                 try:
+
                     rel_x = float(parts[1])
-                    rel_y = float(parts[2])
-                    
+                    rel_y = float(parts[2].splitlines()[0])
                     # Get screen dimensions
                     screen_width, screen_height = pyautogui.size()
                     
@@ -204,6 +204,7 @@ class RemoteDesktopControl:
                     # Move the mouse
                     pyautogui.moveTo(x, y)
                     return "OK"
+                
                 except ValueError as e:
                     print(f"[!] Error parsing mouse coordinates: {e}")
                     return f"ERROR: {str(e)}"
@@ -212,9 +213,9 @@ class RemoteDesktopControl:
                 # Format: MOUSE_CLICK|button|action
                 if len(parts) < 3:
                     return "ERROR: Invalid MOUSE_CLICK command"
-                    
+                  
                 button = parts[1]  # left, right, middle
-                action = parts[2]  # click, press, release
+                action = parts[2].splitlines()[0]  # click, press, release
                 
                 print(f"[DEBUG] Mouse {button} {action}")
                 
@@ -1489,7 +1490,19 @@ class ClientFileHandler:
             
             print(f"[*] Opening file in mode: {file_mode}")
             
-            # Send ready signal
+            # Clear any stale data in the socket buffer before sending READY
+            try:
+                self.client_socket.settimeout(0.1)
+                while True:
+                    stale_data = self.client_socket.recv(1024)
+                    if not stale_data:
+                        break
+            except (socket.timeout, BlockingIOError):
+                pass  # No data to read, which is expected
+            finally:
+                self.client_socket.settimeout(None)
+            
+            # Send ready signal - EXACTLY "READY" nothing else
             self.client_socket.send(b"READY")
             print(f"[*] Sent READY signal, waiting for data...")
             
@@ -1523,6 +1536,7 @@ class ClientFileHandler:
                 
                 print(f"[*] Starting to receive data from position: {bytes_received}")
                 last_update_time = time.time()
+                start_time = time.time()  # Added start_time for accurate speed calculation
                 transfer_speed = 0
                 
                 while bytes_received < file_size and not self.stop_transfer:
@@ -1569,9 +1583,8 @@ class ClientFileHandler:
                         # Update transfer state periodically
                         current_time = time.time()
                         if current_time - last_update_time > 2:  # Update every 2 seconds
-                            elapsed_time = current_time - last_update_time
-                            bytes_in_interval = chunk_size
-                            transfer_speed = bytes_in_interval / elapsed_time
+                            elapsed_time = current_time - start_time  # Fixed: use start_time for overall speed
+                            transfer_speed = bytes_received / elapsed_time if elapsed_time > 0 else 0
                             
                             print(f"[*] Progress: {bytes_received}/{file_size} bytes ({(bytes_received/file_size)*100:.1f}%)")
                             print(f"[*] Transfer speed: {self.format_size(transfer_speed)}/s")
@@ -1594,7 +1607,7 @@ class ClientFileHandler:
                             self.save_transfer_states()
                         raise
                     
-                    # Send acknowledgment
+                    # Send acknowledgment - EXACTLY "ACK" nothing else
                     try:
                         self.client_socket.send(b"ACK")
                     except Exception as ack_error:
@@ -1612,7 +1625,7 @@ class ClientFileHandler:
                 del self.transfer_states[transfer_id]
                 self.save_transfer_states()
             
-            # Send success message
+            # Send success message - EXACTLY "SUCCESS" nothing else
             self.client_socket.send(b"SUCCESS")
             print(f"[*] Sent SUCCESS signal")
             
@@ -1653,14 +1666,29 @@ class ClientFileHandler:
             # Get file size
             file_size = os.path.getsize(file_path)
             
+            # Clear any stale data in the socket buffer before sending size
+            try:
+                self.client_socket.settimeout(0.1)
+                while True:
+                    stale_data = self.client_socket.recv(1024)
+                    if not stale_data:
+                        break
+            except (socket.timeout, BlockingIOError):
+                pass  # No data to read, which is expected
+            finally:
+                self.client_socket.settimeout(None)
+            
             # Send file size first
+            print(f"[*] Sending file size: {file_size} bytes")
             self.client_socket.send(struct.pack('Q', file_size))
             
             # Wait for ready signal with timeout
             self.client_socket.settimeout(30)
             try:
                 ready = self.client_socket.recv(1024)
-                if ready != b"READY":
+                print(f"[*] Received response: {ready}")
+                
+                if b"READY" not in ready:  # Changed to check for substring
                     print(f"[!] Received unexpected response instead of READY: {ready}")
                     return
             except socket.timeout:
@@ -1690,6 +1718,7 @@ class ClientFileHandler:
                     'position': resume_position
                 }
                 self.save_transfer_states()
+                print(f"[*] Saved transfer state for ID: {transfer_id}")
             
             # Send file data
             with open(file_path, 'rb') as f:
@@ -1742,9 +1771,11 @@ class ClientFileHandler:
                     
                     # Wait for acknowledgment with timeout
                     try:
-                        self.client_socket.settimeout(15)  # 15 second timeout for ACK
+                        self.client_socket.settimeout(20)  # Increased to 20 seconds for larger files
                         ack = self.client_socket.recv(1024)
                         self.client_socket.settimeout(None)
+                        
+                        print(f"[*] Received ACK response: {ack}")  # Debug logging
                         
                         if ack == b"CANCEL":
                             print(f"[!] Transfer cancelled by server")
@@ -1754,13 +1785,14 @@ class ClientFileHandler:
                                 self.save_transfer_states()
                             return
                             
-                        if ack != b"ACK":
+                        # Modified to accept ACK as substring
+                        if b"ACK" not in ack:
                             print(f"[!] Unexpected acknowledgment: {ack}")
                             # Save transfer state for potential resume
                             if transfer_id:
                                 self.transfer_states[transfer_id]['position'] = bytes_sent
                                 self.save_transfer_states()
-                            raise Exception("Unexpected response from server")
+                            raise Exception(f"Unexpected response from server: {ack}")
                             
                     except socket.timeout:
                         print(f"[!] Timeout waiting for acknowledgment")
@@ -1776,16 +1808,19 @@ class ClientFileHandler:
             if transfer_id and transfer_id in self.transfer_states and bytes_sent >= file_size:
                 del self.transfer_states[transfer_id]
                 self.save_transfer_states()
+                print(f"[*] Transfer state cleared for completed transfer")
             
             # Wait for final confirmation with timeout
             try:
-                self.client_socket.settimeout(10)
+                self.client_socket.settimeout(20)  # Increased to 20 seconds
                 final_response = self.client_socket.recv(1024)
                 self.client_socket.settimeout(None)
                 
-                if final_response == b"SUCCESS":
+                print(f"[*] Received final response: {final_response}")  # Debug logging
+                
+                if b"SUCCESS" in final_response:  # Modified to accept SUCCESS as substring
                     print(f"[*] Server confirmed successful transfer")
-                elif final_response == b"CANCEL":
+                elif b"CANCEL" in final_response:
                     print(f"[!] Transfer cancelled by server at the end")
                 else:
                     print(f"[!] Unexpected final response: {final_response}")
