@@ -31,8 +31,12 @@ import re
 import hashlib
 import csv
 import select
-
-
+import asyncio
+import concurrent.futures
+import functools
+import psutil
+import queue
+import colorsys
 
 
 THEMES = {
@@ -62,12 +66,12 @@ THEMES = {
 
 # Add custom fonts
 FONT_STYLES = {
-    "heading": ("Roboto", 18, "bold"),  # Modern sans-serif font
-    "subheading": ("Roboto", 14, "bold"),
-    "normal": ("Open Sans", 11),  # Highly readable sans-serif
-    "small": ("Open Sans", 9),  # Smaller text for secondary information
-    "monospace": ("Fira Code", 11),  # Developer-friendly monospace
-    "status": ("Lato", 11, "bold")
+    "heading": ("Segoe UI", 18, "bold"),  # Modern sans-serif font
+    "subheading": ("Segoe UI", 14, "bold"),
+    "normal": ("Segoe UI", 11),  # Highly readable sans-serif
+    "small": ("Segoe UI", 9),  # Smaller text for secondary information
+    "monospace": ("Segoe UI", 11),  # Developer-friendly monospace
+    "status": ("Segoe UI", 11, "bold")
 }
 
 
@@ -17670,8 +17674,517 @@ class EnhancedClientGeoMapping:
         
         return country_names.get(country_code.upper(), "Unknown Country")
                 
-                
+         
+
+
+class UIEnhancer:
+    """
+    UI enhancement module for the RAT Server that provides:
+    - Real-time performance visualization
+    - Modern dashboard with data analytics
+    - Interactive client map
+    - Dark mode and high contrast themes
+    - Responsive layout adjustments
+    """
+    
+    def __init__(self, rat_server):
+        """Initialize the UI enhancer with a RAT server instance"""
+        self.rat_server = rat_server
+        self.performance_data = {
+            'cpu': [],
+            'memory': [],
+            'network': [],
+            'clients': [],
+            'timestamps': []
+        }
+        self.current_plots = {}
+        self.animation_frames = {}
         
+        # Add additional themes
+        self.add_themes()
+        
+        # Add responsive layout handlers
+        self.add_responsive_handlers()
+        
+        # Setup enhanced dashboard
+        self.enhance_dashboard()
+        
+        # Start UI update timer
+        self.rat_server.root.after(1000, self.update_ui_elements)
+    
+    def add_themes(self):
+        """Add additional themes to the RAT server"""
+        # High contrast theme for accessibility
+        high_contrast = {
+            "bg_color": "#000000",
+            "fg_color": "#FFFFFF",
+            "button_color": "#0050AA",
+            "accent_color": "#FFFF00",
+            "danger_color": "#FF0000",
+            "success_color": "#00FF00",
+            "warning_color": "#FFA500",
+            "info_color": "#00FFFF",
+            "card_color": "#000000",
+            "hover_color": "#0066CC",
+            "input_bg": "#333333",
+            "border_color": "#FFFFFF"
+        }
+        
+        # Cyberpunk theme for style
+        cyberpunk = {
+            "bg_color": "#0D0221",
+            "fg_color": "#00FFFF",
+            "button_color": "#D100D1",
+            "accent_color": "#00FF9F",
+            "danger_color": "#FF0055",
+            "success_color": "#00FF9F",
+            "warning_color": "#FFCC00",
+            "info_color": "#00BBFF",
+            "card_color": "#1A0B2E",
+            "hover_color": "#FF00FF",
+            "input_bg": "#160C36",
+            "border_color": "#00FFFF"
+        }
+        
+        # Minimal theme for clean look
+        minimal = {
+            "bg_color": "#FFFFFF",
+            "fg_color": "#333333",
+            "button_color": "#EEEEEE",
+            "accent_color": "#007AFF",
+            "danger_color": "#FF3B30",
+            "success_color": "#34C759",
+            "warning_color": "#FF9500",
+            "info_color": "#5AC8FA",
+            "card_color": "#F9F9F9",
+            "hover_color": "#DDDDDD",
+            "input_bg": "#FFFFFF",
+            "border_color": "#DDDDDD"
+        }
+        
+        # Add new themes to the RAT server
+        self.rat_server.THEMES["High Contrast"] = high_contrast
+        self.rat_server.THEMES["Cyberpunk"] = cyberpunk
+        self.rat_server.THEMES["Minimal"] = minimal
+    
+    
+    def add_responsive_handlers(self):
+        """Add handlers for responsive layout adjustments"""
+        # Bind to window resize events
+        self.rat_server.root.bind("<Configure>", self.on_window_resize)
+        
+        # Store the initial window size
+        self.last_width = self.rat_server.root.winfo_width()
+        self.last_height = self.rat_server.root.winfo_height()
+    
+    def on_window_resize(self, event):
+        """Handle window resize events"""
+        # Only respond to actual window size changes, not other configure events
+        if event.widget == self.rat_server.root:
+            current_width = self.rat_server.root.winfo_width()
+            current_height = self.rat_server.root.winfo_height()
+            
+            # Check if size actually changed
+            if current_width != self.last_width or current_height != self.last_height:
+                # Update stored size
+                self.last_width = current_width
+                self.last_height = current_height
+                
+                # Apply responsive adjustments
+                self.adjust_layout_for_size(current_width, current_height)
+    
+    def adjust_layout_for_size(self, width, height):
+        """Adjust layout based on window size"""
+        # For small screens (width < 1000px)
+        if width < 1000:
+            # Collapse sidebar to icons only
+            self.collapse_sidebar()
+            
+            # Switch to a more compact view
+            self.use_compact_layout()
+        else:
+            # Expand sidebar
+            self.expand_sidebar()
+            
+            # Use full layout
+            self.use_full_layout()
+    
+    def collapse_sidebar(self):
+        """Collapse sidebar to icon-only mode"""
+        # Only proceed if sidebar isn't already collapsed
+        if hasattr(self, 'sidebar_collapsed') and self.sidebar_collapsed:
+            return
+            
+        # Remember labels to restore them later
+        self.stored_labels = {}
+        
+        # Hide text from buttons and save them
+        for child in self.rat_server.sidebar_frame.winfo_children():
+            if isinstance(child, ctk.CTkFrame):
+                for subchild in child.winfo_children():
+                    if isinstance(subchild, ctk.CTkButton):
+                        # Store the original text
+                        self.stored_labels[subchild] = subchild.cget("text")
+                        # Set to icon only
+                        subchild.configure(text="")
+            elif isinstance(child, ctk.CTkLabel) and child.cget("text") == "RAT Console":
+                child.configure(text="RAT")
+        
+        # Reduce sidebar width
+        self.rat_server.sidebar_frame.configure(width=80)
+        
+        self.sidebar_collapsed = True
+    
+    def expand_sidebar(self):
+        """Expand sidebar to full mode"""
+        # Only proceed if sidebar is collapsed
+        if not hasattr(self, 'sidebar_collapsed') or not self.sidebar_collapsed:
+            return
+            
+        # Restore text to buttons
+        if hasattr(self, 'stored_labels'):
+            for button, text in self.stored_labels.items():
+                button.configure(text=text)
+        
+        # Restore title
+        for child in self.rat_server.sidebar_frame.winfo_children():
+            if isinstance(child, ctk.CTkLabel) and child.cget("text") == "RAT":
+                child.configure(text="RAT Console")
+        
+        # Restore sidebar width
+        self.rat_server.sidebar_frame.configure(width=200)
+        
+        self.sidebar_collapsed = False
+    
+    def use_compact_layout(self):
+        """Switch to a compact layout for smaller screens"""
+        # Reduce padding
+        for tab in [self.rat_server.dashboard_frame, self.rat_server.clients_frame, 
+                  self.rat_server.command_frame, self.rat_server.monitoring_frame]:
+            for child in tab.winfo_children():
+                # Reduce paddings
+                info = child.grid_info() if hasattr(child, 'grid_info') else {}
+                if info and 'padx' in info and info['padx'] > 2:
+                    child.grid_configure(padx=2, pady=2)
+                info = child.pack_info() if hasattr(child, 'pack_info') else {}
+                if info and 'padx' in info and info['padx'] > 2:
+                    child.pack_configure(padx=2, pady=2)
+    
+    def use_full_layout(self):
+        """Restore full layout for larger screens"""
+        # Restore padding
+        for tab in [self.rat_server.dashboard_frame, self.rat_server.clients_frame, 
+                  self.rat_server.command_frame, self.rat_server.monitoring_frame]:
+            for child in tab.winfo_children():
+                # Restore paddings
+                info = child.grid_info() if hasattr(child, 'grid_info') else {}
+                if info and 'padx' in info and info['padx'] < 5:
+                    child.grid_configure(padx=5, pady=5)
+                info = child.pack_info() if hasattr(child, 'pack_info') else {}
+                if info and 'padx' in info and info['padx'] < 5:
+                    child.pack_configure(padx=5, pady=5)
+    
+    def enhance_dashboard(self):
+        """Add enhanced dashboard elements"""
+        # Add summary cards
+        self.add_summary_cards()
+        
+        # Add activity timeline
+        self.add_activity_timeline()
+    
+    def add_summary_cards(self):
+        """Add summary cards with key metrics to dashboard"""
+        # Get current theme
+        theme = self.rat_server.THEMES[self.rat_server.current_theme]
+        
+        # Create summary cards frame
+        summary_frame = ctk.CTkFrame(self.rat_server.dashboard_frame, fg_color="transparent")
+        summary_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Total clients card
+        client_card = self.create_summary_card(
+            summary_frame,
+            "Total Clients",
+            "0",
+            "👥",
+            theme["accent_color"]
+        )
+        client_card.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        # Active sessions card
+        sessions_card = self.create_summary_card(
+            summary_frame,
+            "Active Sessions",
+            "0",
+            "🔌",
+            theme["info_color"]
+        )
+        sessions_card.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        # Server uptime card
+        uptime_card = self.create_summary_card(
+            summary_frame,
+            "Server Uptime",
+            "00:00:00",
+            "⏱️",
+            theme["success_color"]
+        )
+        uptime_card.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        
+        # Store references to update later
+        self.summary_cards = {
+            'clients': client_card,
+            'sessions': sessions_card,
+            'uptime': uptime_card
+        }
+        
+        # Track with theme manager
+        if hasattr(self.rat_server, 'theme_manager'):
+            self.rat_server.theme_manager.track_widget(summary_frame)
+            for card in self.summary_cards.values():
+                self.rat_server.theme_manager.track_widget(card)
+                for child in card.winfo_children():
+                    self.rat_server.theme_manager.track_widget(child)
+    
+    def create_summary_card(self, parent, title, value, icon, accent_color):
+        """Create a summary card with title, value and icon"""
+        theme = self.rat_server.THEMES[self.rat_server.current_theme]
+        
+        # Create card frame
+        card = ctk.CTkFrame(
+            parent, 
+            fg_color=theme["card_color"],
+            corner_radius=0,
+            border_color=accent_color,
+            border_width=2,
+            height=120
+        )
+        
+        # Add icon
+        icon_label = ctk.CTkLabel(
+            card, 
+            text=icon,
+            font=ctk.CTkFont(size=24),
+            text_color=accent_color
+        )
+        icon_label.pack(anchor=tk.W, padx=15, pady=(15, 5))
+        
+        # Add title
+        title_label = ctk.CTkLabel(
+            card, 
+            text=title,
+            font=ctk.CTkFont(size=12),
+            text_color=theme["fg_color"]
+        )
+        title_label.pack(anchor=tk.W, padx=15, pady=(0, 5))
+        
+        # Add value
+        value_label = ctk.CTkLabel(
+            card, 
+            text=value,
+            font=ctk.CTkFont(size=24, weight="bold"),
+            text_color=accent_color
+        )
+        value_label.pack(anchor=tk.W, padx=15, pady=(0, 15))
+        
+        # Store labels as attributes for updating
+        card.icon_label = icon_label
+        card.title_label = title_label
+        card.value_label = value_label
+        card.accent_color = accent_color
+        
+        return card
+    
+    def add_activity_timeline(self):
+        """Add an activity timeline to the dashboard"""
+        theme = self.rat_server.THEMES[self.rat_server.current_theme]
+        
+        # Create timeline frame
+        timeline_frame = ctk.CTkFrame(
+            self.rat_server.dashboard_frame,
+            fg_color=theme["card_color"],
+            corner_radius=0,
+            border_color=theme["border_color"] if "border_color" in theme else None,
+            border_width=1 if "border_color" in theme else 0
+        )
+        timeline_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Add header
+        timeline_header = ctk.CTkLabel(
+            timeline_frame, 
+            text="RECENT ACTIVITY",
+            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            text_color=theme["fg_color"]
+        )
+        timeline_header.pack(anchor=tk.W, padx=15, pady=10)
+        
+        # Create activity list with custom styling
+        self.activity_list = tk.Frame(
+            timeline_frame,
+            background=theme["card_color"]
+        )
+        self.activity_list.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+        
+        # Add some initial activities
+        self.add_activity_item("Server started", "system", time.time())
+        self.add_activity_item("Waiting for clients", "info", time.time())
+        
+        # Track with theme manager
+        if hasattr(self.rat_server, 'theme_manager'):
+            self.rat_server.theme_manager.track_widget(timeline_frame)
+            self.rat_server.theme_manager.track_widget(timeline_header, "label")
+            self.rat_server.theme_manager.track_widget(self.activity_list)
+    
+    def add_activity_item(self, message, activity_type, timestamp):
+        """Add a new activity item to the timeline"""
+        theme = self.rat_server.THEMES[self.rat_server.current_theme]
+        
+        # Get color based on activity type
+        color_map = {
+            "system": theme["fg_color"],
+            "info": theme["info_color"],
+            "success": theme["success_color"],
+            "warning": theme["warning_color"],
+            "error": theme["danger_color"],
+            "client": theme["accent_color"]
+        }
+        color = color_map.get(activity_type, theme["fg_color"])
+        
+        # Get icon based on activity type
+        icon_map = {
+            "system": "🖥️",
+            "info": "ℹ️",
+            "success": "✅",
+            "warning": "⚠️",
+            "error": "❌",
+            "client": "👤"
+        }
+        icon = icon_map.get(activity_type, "•")
+        
+        # Format timestamp
+        time_str = time.strftime("%H:%M:%S", time.localtime(timestamp))
+        
+        # Create activity item frame
+        item_frame = tk.Frame(
+            self.activity_list,
+            background=theme["card_color"]
+        )
+        item_frame.pack(fill=tk.X, pady=2)
+        
+        # Add colored icon with activity type
+        icon_label = tk.Label(
+            item_frame,
+            text=icon,
+            foreground=color,
+            background=theme["card_color"],
+            font=("Segoe UI", 10)
+        )
+        icon_label.pack(side=tk.LEFT, padx=(0, 5))
+        
+        # Add message
+        message_label = tk.Label(
+            item_frame,
+            text=message,
+            foreground=theme["fg_color"],
+            background=theme["card_color"],
+            font=("Segoe UI", 9),
+            anchor="w",
+            justify="left"
+        )
+        message_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        
+        # Add timestamp
+        time_label = tk.Label(
+            item_frame,
+            text=time_str,
+            foreground=theme["fg_color"],
+            background=theme["card_color"],
+            font=("Segoe UI", 8)
+        )
+        time_label.pack(side=tk.RIGHT, padx=5)
+        
+        # Store item in a list to track and update with theme changes
+        if not hasattr(self, 'activity_items'):
+            self.activity_items = []
+        
+        self.activity_items.append({
+            'frame': item_frame,
+            'icon': icon_label,
+            'message': message_label,
+            'time': time_label,
+            'type': activity_type
+        })
+        
+        # Limit list to 10 items
+        if len(self.activity_items) > 10:
+            old_item = self.activity_items.pop(0)
+            old_item['frame'].destroy()
+    
+    
+    def update_ui_elements(self):
+        """Update all UI elements with fresh data"""
+        try:
+            
+            # Update summary cards
+            self.update_summary_cards()
+            
+            # Schedule the next update
+            self.rat_server.root.after(1000, self.update_ui_elements)
+        except Exception as e:
+            print(f"Error updating UI elements: {e}")
+            # Ensure the timer continues even if there's an error
+            self.rat_server.root.after(1000, self.update_ui_elements)
+    
+    
+    def update_summary_cards(self):
+        """Update summary cards with fresh data"""
+        try:
+            # Update clients card
+            client_count = len(self.rat_server.clients)
+            self.summary_cards['clients'].value_label.configure(text=str(client_count))
+            
+            # Update sessions card
+            active_sessions = sum(1 for client in self.rat_server.clients.values() 
+                               if client[1] == self.rat_server.current_client_socket)
+            self.summary_cards['sessions'].value_label.configure(text=str(active_sessions))
+            
+            # Update uptime card
+            if self.rat_server.is_server_running and self.rat_server.start_time is not None:
+                current_time = time.time()
+                uptime_seconds = int(current_time - self.rat_server.start_time)
+                
+                # Format as HH:MM:SS
+                hours, remainder = divmod(uptime_seconds, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                uptime_str = f"{hours:02}:{minutes:02}:{seconds:02}"
+                
+                self.summary_cards['uptime'].value_label.configure(text=uptime_str)
+            
+        except Exception as e:
+            print(f"Error updating summary cards: {e}")
+    
+    
+    def update_activity_list(self):
+        """Monitor rat_server logs and add them to the activity list"""
+        # Override the rat_server log method to also update our activity list
+        original_log = self.rat_server.log
+        
+        def enhanced_log(self, msg, log_type="info"):
+            # Call original log method
+            original_log(self, msg, log_type)
+            
+            # Add to activity timeline
+            if hasattr(self, 'ui_enhancer'):
+                self.ui_enhancer.add_activity_item(msg, log_type, time.time())
+        
+        # Replace the log method
+        self.rat_server.log = enhanced_log.__get__(self.rat_server, type(self.rat_server))
+        
+        # Store reference to self in the rat_server
+        self.rat_server.ui_enhancer = self
+
+    
+       
 class RATServerGUI:
     def __init__(self):
         # Initialize server variables
@@ -17695,12 +18208,19 @@ class RATServerGUI:
         # Make themes accessible to the instance
         self.THEMES = THEMES
 
-        # Setup GUI
+        # Setup GUI (which will now initialize theme manager after UI components)
         self.setup_gui()
         
-        # Initialize theme manager to handle theme changes
-        self.setup_theme_manager()
-    
+        # Initialize helpers after all UI is ready
+        self.initialize_helpers()
+
+
+    def initialize_helpers(self):
+        """Initialize helper classes that enhance functionality"""
+        # Add UI enhancer for modern interface
+        if not hasattr(self, 'uienhance'):
+            self.uienhance = UIEnhancer(self)
+            
     def get_local_ip(self):
         s = socket.socket()
         s.connect(('1.1.1.1', 80))
@@ -17729,22 +18249,25 @@ class RATServerGUI:
         self.content_frame = ctk.CTkFrame(self.main_frame)
         self.content_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         
+        # Setup status bar
+        self.status_bar = ctk.CTkLabel(self.root, text="Ready", anchor="w")
+        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
+        
         # Setup sidebar
         self.setup_sidebar()
         
         # Setup content area
         self.setup_content_area()
         
-        # Setup status bar
-        self.status_bar = ctk.CTkLabel(self.root, text="Ready", anchor="w")
-        self.status_bar.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
-        
         # Load settings
         self.load_settings()
         
+        # Initialize theme manager after all UI elements are created
+        self.setup_theme_manager()
+        
     def setup_theme_manager(self):
         """Initialize the theme manager and track all theme-sensitive widgets."""
-        self.theme_manager = ThemeManager(self, THEMES)
+        self.theme_manager = ThemeManager(self, self.THEMES)
         
         # Track main frames
         self.theme_manager.track_widget(self.main_frame)
@@ -17773,122 +18296,239 @@ class RATServerGUI:
         # Track menus
         self.theme_manager.track_widget(self.client_menu, "menu")
         
-        # Track custom labels
-        self.theme_manager.track_widget(self.server_status_value, "label")
-        self.theme_manager.track_widget(self.clients_value, "label")
-        self.theme_manager.track_widget(self.screen_display, "label")
-        self.theme_manager.track_widget(self.audio_display, "label")
-        self.theme_manager.track_widget(self.connected_client_label, "label")
-        self.theme_manager.track_widget(self.status_bar, "label")
+        # Track custom labels for modern dashboard
+        if hasattr(self, 'server_status_label'):
+            self.theme_manager.track_widget(self.server_status_label, "label")
+        if hasattr(self, 'server_address_label'):
+            self.theme_manager.track_widget(self.server_address_label, "label")
+        if hasattr(self, 'server_status_light'):
+            self.theme_manager.track_widget(self.server_status_light, "label")
+        if hasattr(self, 'map_clients_count'):
+            self.theme_manager.track_widget(self.map_clients_count, "label")
+        
+        # Track status indicators from old dashboard (if they exist)
+        if hasattr(self, 'server_status_value'):
+            self.theme_manager.track_widget(self.server_status_value, "label")
+        if hasattr(self, 'clients_value'):
+            self.theme_manager.track_widget(self.clients_value, "label")
+        
+        # Track display labels
+        if hasattr(self, 'screen_display'):
+            self.theme_manager.track_widget(self.screen_display, "label")
+        if hasattr(self, 'audio_display'):
+            self.theme_manager.track_widget(self.audio_display, "label")
+        if hasattr(self, 'connected_client_label'):
+            self.theme_manager.track_widget(self.connected_client_label, "label")
+        if hasattr(self, 'status_bar'):
+            self.theme_manager.track_widget(self.status_bar, "label")
         
         # Track buttons
-        buttons = [
-            self.start_server_btn, 
-            self.stop_server_btn,
-            self.start_screen_btn,
-            self.stop_screen_btn,
-            self.start_audio_btn,
-            self.stop_audio_btn,
-            self.start_keyboard_btn,
-            self.stop_keyboard_btn
-        ]
+        buttons = []
+        if hasattr(self, 'start_server_btn'):
+            buttons.append(self.start_server_btn)
+        if hasattr(self, 'stop_server_btn'):
+            buttons.append(self.stop_server_btn)
+        if hasattr(self, 'start_screen_btn'):
+            buttons.append(self.start_screen_btn)
+        if hasattr(self, 'stop_screen_btn'):
+            buttons.append(self.stop_screen_btn)
+        if hasattr(self, 'start_audio_btn'):
+            buttons.append(self.start_audio_btn)
+        if hasattr(self, 'stop_audio_btn'):
+            buttons.append(self.stop_audio_btn)
+        if hasattr(self, 'start_keyboard_btn'):
+            buttons.append(self.start_keyboard_btn)
+        if hasattr(self, 'stop_keyboard_btn'):
+            buttons.append(self.stop_keyboard_btn)
+        
         for button in buttons:
             self.theme_manager.track_widget(button)
-            
+        
+        # Track action buttons for newer dashboard
+        if hasattr(self, 'action_buttons'):
+            for button in self.action_buttons:
+                self.theme_manager.track_widget(button)
+        
         # Apply initial theme
         self.theme_manager.apply_theme(self.current_theme)
-
+        
     def setup_sidebar(self):
+        """Set up a modern, clean sidebar with improved layout and visual hierarchy"""
         # Get theme colors
         theme = self.THEMES[self.current_theme]
         
-        # Logo/Title
-        logo_label = ctk.CTkLabel(self.sidebar_frame, text="RAT Console", 
-                                font=ctk.CTkFont(size=24, weight="bold"),  # Larger, bolder title
-                                text_color=theme["accent_color"])  # Use accent color for logo
-        logo_label.pack(pady=20)
+        # Create a container for the logo area with a more distinct separation
+        logo_container = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        logo_container.pack(fill=tk.X, padx=0, pady=0)
         
-        # Server controls with brutalist styling
+        # Add a sleek accent bar at the top
+        accent_bar = ctk.CTkFrame(logo_container, 
+                                height=4, 
+                                fg_color=theme["accent_color"],
+                                corner_radius=0)
+        accent_bar.pack(fill=tk.X, padx=0, pady=0)
+        
+        # Create a modern logo with icon and text
+        logo_frame = ctk.CTkFrame(logo_container, fg_color="transparent")
+        logo_frame.pack(fill=tk.X, padx=15, pady=(15, 20))
+        
+        # Use a custom icon symbol for the logo
+        logo_icon = ctk.CTkLabel(logo_frame, 
+                            text="⚡", 
+                            font=ctk.CTkFont(size=28, weight="bold"),
+                            text_color=theme["accent_color"])
+        logo_icon.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Modern title with better typography
+        logo_label = ctk.CTkLabel(logo_frame, 
+                                text="RAT Console", 
+                                font=ctk.CTkFont(size=22, weight="bold"),
+                                text_color=theme["fg_color"])
+        logo_label.pack(side=tk.LEFT)
+        
+        # Server controls section with cleaner styling
         server_frame = ctk.CTkFrame(self.sidebar_frame, 
-                                  fg_color=theme["card_color"],
-                                  border_color=theme["border_color"] if "border_color" in theme else None,
-                                  border_width=1 if "border_color" in theme else 0)
-        server_frame.pack(fill=tk.X, padx=10, pady=10)
+                                fg_color=theme["card_color"],
+                                corner_radius=8,  # Rounded corners
+                                border_width=0)  # No border for cleaner look
+        server_frame.pack(fill=tk.X, padx=15, pady=10)
         
-        server_label = ctk.CTkLabel(server_frame, text="SERVER CONTROLS",  # All caps for brutalist look
-                                  font=ctk.CTkFont(weight="bold"),
-                                  text_color=theme["fg_color"])
-        server_label.pack(pady=5)
+        # Section heading with icon and improved typography
+        server_header = ctk.CTkFrame(server_frame, fg_color="transparent")
+        server_header.pack(fill=tk.X, padx=12, pady=(12, 5))
         
-        # IP and Port inputs with border
-        ip_frame = ctk.CTkFrame(server_frame, fg_color="transparent")
-        ip_frame.pack(fill=tk.X, pady=5)
+        server_icon = ctk.CTkLabel(server_header, 
+                                text="🖥️", 
+                                font=ctk.CTkFont(size=16),
+                                width=25,
+                                text_color=theme["accent_color"])
+        server_icon.pack(side=tk.LEFT)
         
-        ip_label = ctk.CTkLabel(ip_frame, text="IP:", width=30, text_color=theme["fg_color"])
-        ip_label.pack(side=tk.LEFT, padx=5)
+        server_label = ctk.CTkLabel(server_header, 
+                                text="Server Controls",  # Title case instead of all caps
+                                font=ctk.CTkFont(size=14, weight="bold"),
+                                text_color=theme["fg_color"])
+        server_label.pack(side=tk.LEFT, padx=5)
         
-        self.ip_entry = ctk.CTkEntry(ip_frame, 
-                                   fg_color=theme["input_bg"] if "input_bg" in theme else theme["bg_color"], 
-                                   text_color=theme["fg_color"],
-                                   border_color=theme["border_color"] if "border_color" in theme else theme["accent_color"],
-                                   border_width=1,
-                                   corner_radius=0)  # Square corners
-        self.ip_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        # IP and Port inputs with improved styling
+        input_container = ctk.CTkFrame(server_frame, fg_color="transparent")
+        input_container.pack(fill=tk.X, padx=12, pady=(5, 12))
+        
+        # IP input with label above for better layout
+        ip_container = ctk.CTkFrame(input_container, fg_color="transparent")
+        ip_container.pack(fill=tk.X, pady=(0, 8))
+        
+        ip_label = ctk.CTkLabel(ip_container, 
+                            text="IP Address", 
+                            anchor="w",
+                            font=ctk.CTkFont(size=12),
+                            text_color=theme["fg_color"])
+        ip_label.pack(anchor="w", padx=5, pady=(0, 3))
+        
+        self.ip_entry = ctk.CTkEntry(ip_container, 
+                                fg_color=theme["input_bg"] if "input_bg" in theme else theme["bg_color"], 
+                                text_color=theme["fg_color"],
+                                border_color=theme["border_color"] if "border_color" in theme else theme["accent_color"],
+                                border_width=1,
+                                corner_radius=6,  # Rounded corners
+                                height=30)
+        self.ip_entry.pack(fill=tk.X, pady=0)
         self.ip_entry.insert(0, self.ip)
         
-        port_frame = ctk.CTkFrame(server_frame, fg_color="transparent")
-        port_frame.pack(fill=tk.X, pady=5)
+        # Port input with label above
+        port_container = ctk.CTkFrame(input_container, fg_color="transparent")
+        port_container.pack(fill=tk.X, pady=0)
         
-        port_label = ctk.CTkLabel(port_frame, text="Port:", width=30, text_color=theme["fg_color"])
-        port_label.pack(side=tk.LEFT, padx=5)
+        port_label = ctk.CTkLabel(port_container, 
+                                text="Port", 
+                                anchor="w",
+                                font=ctk.CTkFont(size=12),
+                                text_color=theme["fg_color"])
+        port_label.pack(anchor="w", padx=5, pady=(0, 3))
         
-        self.port_entry = ctk.CTkEntry(port_frame, 
-                                     fg_color=theme["input_bg"] if "input_bg" in theme else theme["bg_color"], 
-                                     text_color=theme["fg_color"],
-                                     border_color=theme["border_color"] if "border_color" in theme else theme["accent_color"],
-                                     border_width=1,
-                                     corner_radius=0)  # Square corners
-        self.port_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.port_entry = ctk.CTkEntry(port_container,
+                                    fg_color=theme["input_bg"] if "input_bg" in theme else theme["bg_color"], 
+                                    text_color=theme["fg_color"],
+                                    border_color=theme["border_color"] if "border_color" in theme else theme["accent_color"],
+                                    border_width=1,
+                                    corner_radius=6,  # Rounded corners
+                                    height=30)
+        self.port_entry.pack(fill=tk.X, pady=0)
         self.port_entry.insert(0, str(self.port))
         
-        # Server buttons with brutalist styling
-        self.start_server_btn = ctk.CTkButton(server_frame, text="START SERVER",  # All caps
+        # Button container for aligned buttons
+        button_container = ctk.CTkFrame(server_frame, fg_color="transparent")
+        button_container.pack(fill=tk.X, padx=12, pady=(5, 12))
+        
+        # Server buttons with improved styling
+        self.start_server_btn = ctk.CTkButton(button_container, 
+                                            text="Start Server",  # Title case
                                             command=self.start_server_gui,
-                                            fg_color=theme["success_color"],  # Use success color for start
-                                            hover_color=theme["hover_color"],
-                                            text_color="#000000",  # Black text for contrast
-                                            border_color=theme["border_color"] if "border_color" in theme else None,
-                                            border_width=1 if "border_color" in theme else 0,
-                                            corner_radius=0,  # Square corners
-                                            height=35)  # Taller button
-        self.start_server_btn.pack(fill=tk.X, pady=5)
+                                            fg_color=theme["success_color"],
+                                            text_color="#FFFFFF",  # White text for better contrast
+                                            border_width=0,
+                                            corner_radius=6,  # Rounded corners
+                                            height=35,
+                                            font=ctk.CTkFont(size=13, weight="bold"))
+        self.start_server_btn.pack(fill=tk.X, pady=(0, 5))
         
-        self.stop_server_btn = ctk.CTkButton(server_frame, text="STOP SERVER",  # All caps
-                                           command=self.stop_server, 
-                                           state="disabled",
-                                           fg_color=theme["danger_color"],  # Use danger color for stop
-                                           hover_color=theme["hover_color"],
-                                           text_color="#000000",  # Black text for contrast
-                                           border_color=theme["border_color"] if "border_color" in theme else None,
-                                           border_width=1 if "border_color" in theme else 0,
-                                           corner_radius=0,  # Square corners
-                                           height=35)  # Taller button
-        self.stop_server_btn.pack(fill=tk.X, pady=5)
+        self.stop_server_btn = ctk.CTkButton(button_container, 
+                                        text="Stop Server",  # Title case
+                                        command=self.stop_server, 
+                                        state="disabled",
+                                        fg_color=theme["danger_color"],
+                                        text_color="#FFFFFF",  # White text for better contrast
+                                        border_width=0,
+                                        corner_radius=6,  # Rounded corners
+                                        height=35,
+                                        font=ctk.CTkFont(size=13, weight="bold"))
+        self.stop_server_btn.pack(fill=tk.X)
         
-        # Theme selection with brutalist styling
-        theme_frame = ctk.CTkFrame(self.sidebar_frame, 
-                                 fg_color=theme["card_color"],
-                                 border_color=theme["border_color"] if "border_color" in theme else None,
-                                 border_width=1 if "border_color" in theme else 0)
-        theme_frame.pack(fill=tk.X, padx=10, pady=10)
+        # Create a divider for visual separation
+        divider = ctk.CTkFrame(self.sidebar_frame, 
+                            height=1, 
+                            fg_color=theme["border_color"] if "border_color" in theme else theme["bg_color"],
+                            corner_radius=0)
+        divider.pack(fill=tk.X, padx=15, pady=10)
         
-        theme_label = ctk.CTkLabel(theme_frame, text="APPEARANCE",  # All caps
-                                 font=ctk.CTkFont(weight="bold"),
-                                 text_color=theme["fg_color"])
-        theme_label.pack(pady=5)
+        # Settings section with improved design
+        settings_frame = ctk.CTkFrame(self.sidebar_frame, 
+                                    fg_color=theme["card_color"],
+                                    corner_radius=8,  # Rounded corners
+                                    border_width=0)  # No border for cleaner look
+        settings_frame.pack(fill=tk.X, padx=15, pady=10)
+        
+        # Settings header with icon
+        settings_header = ctk.CTkFrame(settings_frame, fg_color="transparent")
+        settings_header.pack(fill=tk.X, padx=12, pady=(12, 5))
+        
+        settings_icon = ctk.CTkLabel(settings_header, 
+                                text="⚙️", 
+                                font=ctk.CTkFont(size=16),
+                                width=25,
+                                text_color=theme["accent_color"])
+        settings_icon.pack(side=tk.LEFT)
+        
+        settings_label = ctk.CTkLabel(settings_header, 
+                                    text="Appearance",  # Title case instead of all caps
+                                    font=ctk.CTkFont(size=14, weight="bold"),
+                                    text_color=theme["fg_color"])
+        settings_label.pack(side=tk.LEFT, padx=5)
+        
+        # Theme selection with improved styling
+        theme_container = ctk.CTkFrame(settings_frame, fg_color="transparent")
+        theme_container.pack(fill=tk.X, padx=12, pady=(5, 12))
+        
+        theme_label = ctk.CTkLabel(theme_container, 
+                                text="Theme", 
+                                anchor="w",
+                                font=ctk.CTkFont(size=12),
+                                text_color=theme["fg_color"])
+        theme_label.pack(anchor="w", padx=5, pady=(0, 3))
         
         self.theme_var = tk.StringVar(value=self.current_theme)
-        theme_options = ctk.CTkOptionMenu(theme_frame, values=list(THEMES.keys()), 
+        theme_options = ctk.CTkOptionMenu(theme_container, 
+                                        values=list(self.THEMES.keys()), 
                                         variable=self.theme_var, 
                                         command=self.change_theme,
                                         fg_color=theme["button_color"],
@@ -17898,37 +18538,104 @@ class RATServerGUI:
                                         dropdown_hover_color=theme["hover_color"],
                                         dropdown_text_color=theme["fg_color"],
                                         text_color=theme["fg_color"],
-                                        corner_radius=0)  # Square corners
-        theme_options.pack(fill=tk.X, pady=5)
+                                        corner_radius=6,  # Rounded corners
+                                        font=ctk.CTkFont(size=13))
+        theme_options.pack(fill=tk.X)
+        
+        # Add status indicator at the bottom
+        status_container = ctk.CTkFrame(self.sidebar_frame, fg_color="transparent")
+        status_container.pack(fill=tk.X, side=tk.BOTTOM, padx=15, pady=15)
+        
+        status_indicator = ctk.CTkFrame(status_container, fg_color="transparent")
+        status_indicator.pack(side=tk.LEFT)
+        
+        self.status_dot = ctk.CTkLabel(status_indicator, 
+                                    text="●", 
+                                    font=ctk.CTkFont(size=16),
+                                    text_color=theme["danger_color"])  # Default to offline
+        self.status_dot.pack(side=tk.LEFT)
+        
+        self.status_text = ctk.CTkLabel(status_indicator, 
+                                    text="Server Offline", 
+                                    font=ctk.CTkFont(size=12),
+                                    text_color=theme["fg_color"])
+        self.status_text.pack(side=tk.LEFT, padx=5)
+        
+        # Version text at bottom right
+        self.version_label = ctk.CTkLabel(status_container, 
+                                        text="v1.0", 
+                                        font=ctk.CTkFont(size=10),
+                                        text_color=theme["fg_color"])
+        self.version_label.pack(side=tk.RIGHT)
         
         # Store sidebar components for theme updates
         self.sidebar_components = {
+            "logo_icon": logo_icon,
             "logo_label": logo_label,
+            "accent_bar": accent_bar,
             "server_frame": server_frame,
+            "server_icon": server_icon,
             "server_label": server_label,
+            "settings_frame": settings_frame,
+            "settings_icon": settings_icon,
+            "settings_label": settings_label,
             "ip_label": ip_label,
             "port_label": port_label,
-            "theme_frame": theme_frame,
             "theme_label": theme_label,
+            "divider": divider,
+            "status_dot": self.status_dot,
+            "status_text": self.status_text,
+            "version_label": self.version_label,
             "theme_options": theme_options
         }
         
         # Track all sidebar widgets with theme manager
         if hasattr(self, 'theme_manager'):
+            self.theme_manager.track_widget(logo_container)
+            self.theme_manager.track_widget(accent_bar)
+            self.theme_manager.track_widget(logo_frame)
+            self.theme_manager.track_widget(logo_icon)
             self.theme_manager.track_widget(logo_label)
             self.theme_manager.track_widget(server_frame)
+            self.theme_manager.track_widget(server_header)
+            self.theme_manager.track_widget(server_icon)
             self.theme_manager.track_widget(server_label)
-            self.theme_manager.track_widget(ip_frame)
+            self.theme_manager.track_widget(input_container)
+            self.theme_manager.track_widget(ip_container)
             self.theme_manager.track_widget(ip_label)
             self.theme_manager.track_widget(self.ip_entry)
-            self.theme_manager.track_widget(port_frame)
+            self.theme_manager.track_widget(port_container)
             self.theme_manager.track_widget(port_label)
             self.theme_manager.track_widget(self.port_entry)
+            self.theme_manager.track_widget(button_container)
             self.theme_manager.track_widget(self.start_server_btn)
             self.theme_manager.track_widget(self.stop_server_btn)
-            self.theme_manager.track_widget(theme_frame)
+            self.theme_manager.track_widget(divider)
+            self.theme_manager.track_widget(settings_frame)
+            self.theme_manager.track_widget(settings_header)
+            self.theme_manager.track_widget(settings_icon)
+            self.theme_manager.track_widget(settings_label)
+            self.theme_manager.track_widget(theme_container)
             self.theme_manager.track_widget(theme_label)
             self.theme_manager.track_widget(theme_options)
+            self.theme_manager.track_widget(status_container)
+            self.theme_manager.track_widget(status_indicator)
+            self.theme_manager.track_widget(self.status_dot)
+            self.theme_manager.track_widget(self.status_text)
+            self.theme_manager.track_widget(self.version_label)
+
+
+
+    def update_server_status_indicator(self, is_running=False):
+        """Update the server status indicator in the sidebar"""
+        theme = self.THEMES[self.current_theme]
+        
+        if is_running:
+            self.status_dot.configure(text_color=theme["success_color"])
+            self.status_text.configure(text="Server Online")
+        else:
+            self.status_dot.configure(text_color=theme["danger_color"])
+            self.status_text.configure(text="Server Offline")
 
     def setup_content_area(self):
        # Create notebook for tabbed interface
@@ -17979,37 +18686,855 @@ class RATServerGUI:
         self.settings_frame = ctk.CTkFrame(self.notebook, fg_color=theme["card_color"], bg_color=theme["bg_color"])
         self.notebook.add(self.settings_frame, text="Settings")
         self.setup_settings_tab()
+        self.uienhance = UIEnhancer(self)
+                
+    def setup_dashboard(self):
+        """Set up a modern, visually appealing dashboard with enhanced metrics and data visualization"""
+        # Get theme colors
+        theme = self.THEMES[self.current_theme]
         
+        # Create main container with padding
+        main_container = ctk.CTkFrame(self.dashboard_frame, fg_color="transparent")
+        main_container.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        
+        # Create a header section
+        self.create_dashboard_header(main_container)
+        
+        # Create a grid layout with flexible columns
+        dashboard_grid = ctk.CTkFrame(main_container, fg_color="transparent")
+        dashboard_grid.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        # Configure grid columns
+        dashboard_grid.columnconfigure(0, weight=2)  # Left column (wider)
+        dashboard_grid.columnconfigure(1, weight=1)  # Right column
+        
+        # Create left and right frames
+        dashboard_left = ctk.CTkFrame(dashboard_grid, fg_color="transparent")
+        dashboard_left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        
+        dashboard_right = ctk.CTkFrame(dashboard_grid, fg_color="transparent")
+        dashboard_right.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        
+        # Setup left column with status cards and activity log
+        self.setup_left_column(dashboard_left)
+        
+        # Setup right column with performance metrics and alerts
+        self.setup_right_column(dashboard_right)
+        
+        # Start performance monitoring thread
+        self.start_performance_monitoring()
+        
+        # Register main container with theme manager
+        if hasattr(self, 'theme_manager'):
+            self.theme_manager.track_widget(main_container)
+            self.theme_manager.track_widget(dashboard_grid)
+            self.theme_manager.track_widget(dashboard_left)
+            self.theme_manager.track_widget(dashboard_right)
+
+    def create_dashboard_header(self, parent):
+        """Create a modern header with summary statistics"""
+        theme = self.THEMES[self.current_theme]
+        
+        # Create header container
+        header_container = ctk.CTkFrame(parent, fg_color="transparent")
+        header_container.pack(fill=tk.X, pady=(0, 15))
+        
+        # Server status indicator
+        status_container = ctk.CTkFrame(header_container, 
+                                    fg_color=theme["card_color"],
+                                    corner_radius=12,
+                                    border_width=0)
+        status_container.pack(side=tk.LEFT, fill=tk.Y)
+        
+        # Create status light
+        self.server_status_light = ctk.CTkLabel(status_container, 
+                                            text="●", 
+                                            font=ctk.CTkFont(size=24),
+                                            text_color=theme["danger_color"])
+        self.server_status_light.pack(side=tk.LEFT, padx=(15, 5), pady=12)
+        
+        status_text_frame = ctk.CTkFrame(status_container, fg_color="transparent")
+        status_text_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 15), pady=12)
+        
+        self.server_status_label = ctk.CTkLabel(status_text_frame, 
+                                            text="Server Offline", 
+                                            font=ctk.CTkFont(size=16, weight="bold"),
+                                            text_color=theme["fg_color"])
+        self.server_status_label.pack(anchor="w")
+        
+        self.server_address_label = ctk.CTkLabel(status_text_frame, 
+                                            text=f"{self.ip}:{self.port}", 
+                                            font=ctk.CTkFont(size=12),
+                                            text_color=theme["fg_color"])
+        self.server_address_label.pack(anchor="w")
+        
+        # Summary statistics cards
+        self.create_summary_cards(header_container)
+        
+        # Register with theme manager
+        if hasattr(self, 'theme_manager'):
+            self.theme_manager.track_widget(header_container)
+            self.theme_manager.track_widget(status_container)
+            self.theme_manager.track_widget(self.server_status_light, "label")
+            self.theme_manager.track_widget(status_text_frame)
+            self.theme_manager.track_widget(self.server_status_label, "label")
+            self.theme_manager.track_widget(self.server_address_label, "label")
+
+    def create_summary_cards(self, parent):
+        """Create summary statistic cards for the dashboard header"""
+        theme = self.THEMES[self.current_theme]
+        
+        # Create container for cards
+        cards_container = ctk.CTkFrame(parent, fg_color="transparent")
+        cards_container.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Create and store the summary cards
+        self.summary_cards = {}
+        
+        # Uptime card
+        uptime_card = self.create_stat_card(
+            cards_container,
+            "🇮🇶",
+            "AKPKALESS",
+            "00:00:00",
+            theme["success_color"]
+        )
+        uptime_card.pack(side=tk.LEFT, padx=5)
+        self.summary_cards['uptime'] = uptime_card
+        
+        # CPU usage card
+        cpu_card = self.create_stat_card(
+            cards_container,
+            "IG",
+            "apkaless",
+            "▶︎ •၊၊||၊|။||||။‌‌‌‌‌၊|• 0:10",
+            theme["accent_color"]
+        )
+        cpu_card.pack(side=tk.LEFT, padx=5)
+        self.summary_cards['cpu'] = cpu_card
+        
+        # Register with theme manager
+        if hasattr(self, 'theme_manager'):
+            self.theme_manager.track_widget(cards_container)
+            for card_key, card in self.summary_cards.items():
+                self.theme_manager.track_widget(card)
+                for child in card.winfo_children():
+                    self.theme_manager.track_widget(child)
+
+    def create_stat_card(self, parent, icon, title, value, color):
+        """Create a stylish statistic card with icon, title and value"""
+        theme = self.THEMES[self.current_theme]
+        
+        # Create card frame
+        card = ctk.CTkFrame(
+            parent,
+            fg_color=theme["card_color"],
+            corner_radius=12,
+            width=120,
+            height=74
+        )
+        
+        # Create icon with accent color
+        icon_label = ctk.CTkLabel(
+            card,
+            text=icon,
+            font=ctk.CTkFont(size=15),
+            text_color=color
+        )
+        icon_label.place(x=12, y=12)
+        
+        # Create title with smaller, muted text
+        title_label = ctk.CTkLabel(
+            card,
+            text=title,
+            font=ctk.CTkFont(size=11),
+            text_color=theme["fg_color"]
+        )
+        title_label.place(x=40, y=12)
+        
+        # Create value with larger, bold text
+        value_label = ctk.CTkLabel(
+            card,
+            text=value,
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=theme["fg_color"]
+        )
+        value_label.place(x=40, y=34)
+        
+        # Store labels as attributes for updating
+        card.icon_label = icon_label
+        card.title_label = title_label
+        card.value_label = value_label
+        card.accent_color = color
+        
+        return card
+
+    def setup_left_column(self, parent):
+        """Setup the left column with server status card and action buttons"""
+        theme = self.THEMES[self.current_theme]
+        
+        # Create a section for quick action buttons
+        self.create_quick_actions_section(parent)
+        
+        # Create activity log section
+        self.create_activity_log_section(parent)
+
+    def create_quick_actions_section(self, parent):
+        """Create a modern quick actions section with icon buttons"""
+        theme = self.THEMES[self.current_theme]
+        
+        # Create frame for quick actions
+        actions_frame = ctk.CTkFrame(
+            parent,
+            fg_color=theme["card_color"],
+            corner_radius=12,
+            border_width=0
+        )
+        actions_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        # Create header with icon
+        header_frame = ctk.CTkFrame(actions_frame, fg_color="transparent")
+        header_frame.pack(fill=tk.X, padx=15, pady=(15, 10))
+        
+        header_icon = ctk.CTkLabel(
+            header_frame,
+            text="⚡",
+            font=ctk.CTkFont(size=16),
+            text_color=theme["accent_color"],
+            width=25
+        )
+        header_icon.pack(side=tk.LEFT)
+        
+        header_label = ctk.CTkLabel(
+            header_frame,
+            text="Quick Actions",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=theme["fg_color"]
+        )
+        header_label.pack(side=tk.LEFT)
+        
+        # Create buttons container
+        buttons_container = ctk.CTkFrame(actions_frame, fg_color="transparent")
+        buttons_container.pack(fill=tk.X, padx=15, pady=(0, 15))
+        
+        # Configure grid
+        buttons_container.columnconfigure(0, weight=1)
+        buttons_container.columnconfigure(1, weight=1)
+        
+        # Store action buttons for theme updates
+        self.action_buttons = []
+        
+        # Create stylish action buttons
+        refresh_btn = self.create_action_button(
+            buttons_container,
+            "Refresh Clients",
+            "🔄",
+            self.refresh_clients,
+            0, 0, 25, 0.5, 0.15
+        )
+        self.action_buttons.append(refresh_btn)
+        
+        disconnect_btn = self.create_action_button(
+            buttons_container,
+            "Disconnect All",
+            "❌",
+            self.disconnect_all,
+            0, 1, 25, 0.5, 0.13
+        )
+        self.action_buttons.append(disconnect_btn)
+        
+        screen_btn = self.create_action_button(
+            buttons_container,
+            "Screen Capture",
+            "📷",
+            self.quick_screen_capture,
+            1, 0, 25, 0.5, 0.13
+        )
+        self.action_buttons.append(screen_btn)
+        
+        shell_btn = self.create_action_button(
+            buttons_container,
+            "Command Shell",
+            "💻",
+            self.quick_command_shell,
+            1, 1, 25, 0.5, 0.13
+        )
+        self.action_buttons.append(shell_btn)
+        
+        # Register with theme manager
+        if hasattr(self, 'theme_manager'):
+            self.theme_manager.track_widget(actions_frame)
+            self.theme_manager.track_widget(header_frame)
+            self.theme_manager.track_widget(header_icon, "label")
+            self.theme_manager.track_widget(header_label, "label")
+            self.theme_manager.track_widget(buttons_container)
+            for btn in self.action_buttons:
+                self.theme_manager.track_widget(btn)
+
+    def create_action_button(self, parent, text, icon, command, row, column, fsize, relx, rely):
+        """Create a modern action button with icon and hover effect"""
+        theme = self.THEMES[self.current_theme]
+        
+        # Create button with modern styling
+        button = ctk.CTkButton(
+            parent,
+            text=text,
+            image=None,  # Will be created differently
+            compound="top",
+            command=command,
+            fg_color=theme["card_color"],
+            hover_color=self._lighten_color(theme["card_color"]) if "Dark" in self.current_theme else self._darken_color(theme["card_color"]),
+            text_color=theme["fg_color"],
+            corner_radius=8,
+            border_width=1,
+            border_color=theme["border_color"] if "border_color" in theme else self._lighten_color(theme["card_color"]),
+            height=80,
+            font=ctk.CTkFont(size=13)
+        )
+        button.grid(row=row, column=column, padx=5, pady=5, sticky="nsew")
+        
+        # Add icon
+        icon_label = ctk.CTkLabel(
+            button,
+            text=icon,
+            font=ctk.CTkFont(size=fsize),
+            text_color=theme["accent_color"]
+        )
+        icon_label.place(relx=relx, rely=rely, anchor="center")
+        
+        # Store icon for theme updates
+        button.icon_label = icon_label
+        
+        return button
+
+    def create_activity_log_section(self, parent):
+        """Create an enhanced activity log with styled entries"""
+        theme = self.THEMES[self.current_theme]
+        
+        # Create log frame with modern styling
+        log_frame = ctk.CTkFrame(
+            parent,
+            fg_color=theme["card_color"],
+            corner_radius=12,
+            border_width=0
+        )
+        log_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create header with icon
+        header_frame = ctk.CTkFrame(log_frame, fg_color="transparent")
+        header_frame.pack(fill=tk.X, padx=15, pady=(15, 5))
+        
+        header_icon = ctk.CTkLabel(
+            header_frame,
+            text="📋",
+            font=ctk.CTkFont(size=16),
+            text_color=theme["accent_color"],
+            width=25
+        )
+        header_icon.pack(side=tk.LEFT)
+        
+        header_label = ctk.CTkLabel(
+            header_frame,
+            text="Activity Log",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=theme["fg_color"]
+        )
+        header_label.pack(side=tk.LEFT)
+        
+        # Add button controls
+        controls_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        controls_frame.pack(side=tk.RIGHT)
+        
+        clear_log_btn = ctk.CTkButton(
+            controls_frame,
+            text="Clear",
+            command=self.clear_activity_log,
+            fg_color="transparent",
+            hover_color=self._lighten_color(theme["card_color"]) if "Dark" in self.current_theme else self._darken_color(theme["card_color"]),
+            text_color=theme["fg_color"],
+            corner_radius=6,
+            border_width=1,
+            border_color=theme["border_color"] if "border_color" in theme else self._lighten_color(theme["card_color"]),
+            width=60,
+            height=28,
+            font=ctk.CTkFont(size=12)
+        )
+        clear_log_btn.pack(side=tk.LEFT, padx=2)
+        self.action_buttons.append(clear_log_btn)
+        
+        save_log_btn = ctk.CTkButton(
+            controls_frame,
+            text="Save",
+            command=self.save_activity_log,
+            fg_color="transparent",
+            hover_color=self._lighten_color(theme["card_color"]) if "Dark" in self.current_theme else self._darken_color(theme["card_color"]),
+            text_color=theme["fg_color"],
+            corner_radius=6,
+            border_width=1,
+            border_color=theme["border_color"] if "border_color" in theme else self._lighten_color(theme["card_color"]),
+            width=60,
+            height=28,
+            font=ctk.CTkFont(size=12)
+        )
+        save_log_btn.pack(side=tk.LEFT, padx=2)
+        self.action_buttons.append(save_log_btn)
+        
+        # Enhanced log with custom styling
+        log_container = ctk.CTkFrame(log_frame, fg_color="transparent")
+        log_container.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+        
+        # Use custom scrolled text with improved styling
+        self.log_text = scrolledtext.ScrolledText(
+            log_container,
+            wrap=tk.WORD,
+            background=self._adjust_transparency(theme["bg_color"], 0.5),
+            foreground=theme["fg_color"],
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground=theme["border_color"] if "border_color" in theme else theme["bg_color"],
+            font=(FONT_STYLES["monospace"][0], 10),
+            padx=10,
+            pady=10
+        )
+        self.log_text.pack(fill=tk.BOTH, expand=True)
+        self.log_text.configure(state="disabled")
+        
+        # Configure tags for different log levels with modern colors
+        self.log_text.tag_configure("info", foreground=theme["fg_color"])
+        self.log_text.tag_configure("warning", foreground=theme["warning_color"])
+        self.log_text.tag_configure("error", foreground=theme["danger_color"])
+        self.log_text.tag_configure("success", foreground=theme["success_color"])
+        self.log_text.tag_configure("client", foreground=theme["info_color"])
+        
+        # Register with theme manager
+        if hasattr(self, 'theme_manager'):
+            self.theme_manager.track_widget(log_frame)
+            self.theme_manager.track_widget(header_frame)
+            self.theme_manager.track_widget(header_icon, "label")
+            self.theme_manager.track_widget(header_label, "label")
+            self.theme_manager.track_widget(controls_frame)
+            self.theme_manager.track_widget(log_container)
+            self.theme_manager.track_widget(self.log_text, "scrolledtext")
+
+    def setup_right_column(self, parent):
+        """Setup the right column with performance metrics and alerts"""
+        # Create system performance section
+        self.create_performance_section(parent)
+        
+        # Create recent alerts section
+        self.create_alerts_section(parent)
+
+    def create_performance_section(self, parent):
+        """Create an enhanced performance metrics section with visual graphs"""
+        theme = self.THEMES[self.current_theme]
+        
+        # Create performance frame with modern styling
+        performance_frame = ctk.CTkFrame(
+            parent,
+            fg_color=theme["card_color"],
+            corner_radius=12,
+            border_width=0
+        )
+        performance_frame.pack(fill=tk.X, pady=(0, 15))
+        
+        # Create header with icon
+        header_frame = ctk.CTkFrame(performance_frame, fg_color="transparent")
+        header_frame.pack(fill=tk.X, padx=15, pady=(15, 10))
+        
+        header_icon = ctk.CTkLabel(
+            header_frame,
+            text="📊",
+            font=ctk.CTkFont(size=16),
+            text_color=theme["accent_color"],
+            width=25
+        )
+        header_icon.pack(side=tk.LEFT)
+        
+        header_label = ctk.CTkLabel(
+            header_frame,
+            text="System Performance",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=theme["fg_color"]
+        )
+        header_label.pack(side=tk.LEFT)
+        
+        # Create metrics container
+        metrics_container = ctk.CTkFrame(performance_frame, fg_color="transparent")
+        metrics_container.pack(fill=tk.X, padx=15, pady=(0, 15))
+        
+        # Enhanced CPU usage with modern styling
+        cpu_frame = ctk.CTkFrame(metrics_container, fg_color="transparent")
+        cpu_frame.pack(fill=tk.X, pady=5)
+        
+        cpu_label = ctk.CTkLabel(
+            cpu_frame,
+            text="CPU Usage",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=theme["fg_color"],
+            width=90,
+            anchor="w"
+        )
+        cpu_label.pack(side=tk.LEFT, padx=5)
+        
+        self.cpu_value = ctk.CTkLabel(
+            cpu_frame,
+            text="0%",
+            width=40,
+            font=ctk.CTkFont(size=12),
+            text_color=theme["accent_color"]
+        )
+        self.cpu_value.pack(side=tk.RIGHT, padx=5)
+        
+        self.cpu_progress = ctk.CTkProgressBar(
+            cpu_frame,
+            width=150,
+            height=12,
+            progress_color=theme["accent_color"],
+            fg_color=self._adjust_transparency(theme["bg_color"], 0.5),
+            border_width=0,
+            corner_radius=6
+        )
+        self.cpu_progress.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        self.cpu_progress.set(0)
+        
+        # Enhanced Memory usage with modern styling
+        memory_frame = ctk.CTkFrame(metrics_container, fg_color="transparent")
+        memory_frame.pack(fill=tk.X, pady=5)
+        
+        memory_label = ctk.CTkLabel(
+            memory_frame,
+            text="Memory Usage",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=theme["fg_color"],
+            width=90,
+            anchor="w"
+        )
+        memory_label.pack(side=tk.LEFT, padx=5)
+        
+        self.memory_value = ctk.CTkLabel(
+            memory_frame,
+            text="0%",
+            width=40,
+            font=ctk.CTkFont(size=12),
+            text_color=theme["info_color"]
+        )
+        self.memory_value.pack(side=tk.RIGHT, padx=5)
+        
+        self.memory_progress = ctk.CTkProgressBar(
+            memory_frame,
+            width=150,
+            height=12,
+            progress_color=theme["info_color"],
+            fg_color=self._adjust_transparency(theme["bg_color"], 0.5),
+            border_width=0,
+            corner_radius=6
+        )
+        self.memory_progress.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        self.memory_progress.set(0)
+        
+        # Enhanced Network usage with modern styling
+        network_frame = ctk.CTkFrame(metrics_container, fg_color="transparent")
+        network_frame.pack(fill=tk.X, pady=5)
+        
+        network_label = ctk.CTkLabel(
+            network_frame,
+            text="Network I/O",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=theme["fg_color"],
+            width=90,
+            anchor="w"
+        )
+        network_label.pack(side=tk.LEFT, padx=5)
+        
+        self.network_value = ctk.CTkLabel(
+            network_frame,
+            text="0 KB/s",
+            font=ctk.CTkFont(size=12),
+            text_color=theme["success_color"]
+        )
+        self.network_value.pack(side=tk.RIGHT, padx=5)
+        
+        # Add a mini sparkline for network (placeholder)
+        network_sparkline = ctk.CTkProgressBar(
+            network_frame,
+            width=150,
+            height=12,
+            progress_color=theme["success_color"],
+            fg_color=self._adjust_transparency(theme["bg_color"], 0.5),
+            border_width=0,
+            corner_radius=6
+        )
+        network_sparkline.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+        network_sparkline.set(0.3)  # Just visual placeholder
+        
+        # Register with theme manager
+        if hasattr(self, 'theme_manager'):
+            self.theme_manager.track_widget(performance_frame)
+            self.theme_manager.track_widget(header_frame)
+            self.theme_manager.track_widget(header_icon, "label")
+            self.theme_manager.track_widget(header_label, "label")
+            self.theme_manager.track_widget(metrics_container)
+            
+            self.theme_manager.track_widget(cpu_frame)
+            self.theme_manager.track_widget(cpu_label, "label")
+            self.theme_manager.track_widget(self.cpu_value, "label")
+            self.theme_manager.track_widget(self.cpu_progress)
+            
+            self.theme_manager.track_widget(memory_frame)
+            self.theme_manager.track_widget(memory_label, "label")
+            self.theme_manager.track_widget(self.memory_value, "label")
+            self.theme_manager.track_widget(self.memory_progress)
+            
+            self.theme_manager.track_widget(network_frame)
+            self.theme_manager.track_widget(network_label, "label")
+            self.theme_manager.track_widget(self.network_value, "label")
+            self.theme_manager.track_widget(network_sparkline)
+
+
+    def create_alerts_section(self, parent):
+        """Create modern alerts section with enhanced styling"""
+        theme = self.THEMES[self.current_theme]
+        
+        # Create alerts frame with modern styling
+        alerts_frame = ctk.CTkFrame(
+            parent,
+            fg_color=theme["card_color"],
+            corner_radius=12,
+            border_width=0
+        )
+        alerts_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Create header with icon
+        header_frame = ctk.CTkFrame(alerts_frame, fg_color="transparent")
+        header_frame.pack(fill=tk.X, padx=15, pady=(15, 10))
+        
+        header_icon = ctk.CTkLabel(
+            header_frame,
+            text="🔔",
+            font=ctk.CTkFont(size=16),
+            text_color=theme["accent_color"],
+            width=25
+        )
+        header_icon.pack(side=tk.LEFT)
+        
+        header_label = ctk.CTkLabel(
+            header_frame,
+            text="Recent Alerts",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=theme["fg_color"]
+        )
+        header_label.pack(side=tk.LEFT)
+        
+        # Create alerts container
+        alerts_container = ctk.CTkFrame(alerts_frame, fg_color="transparent")
+        alerts_container.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
+        
+        # Create a custom alerts display instead of a basic listbox
+        self.alerts_list_frame = ctk.CTkScrollableFrame(
+            alerts_container,
+            fg_color=self._adjust_transparency(theme["bg_color"], 0.5),
+            corner_radius=6,
+            border_width=0
+        )
+        self.alerts_list_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Initialize with empty alerts list
+        self.alerts_items = []
+        
+        # Add initial message
+        self.add_styled_alert("Server ready - No active alerts", "info")
+        
+        # Register with theme manager
+        if hasattr(self, 'theme_manager'):
+            self.theme_manager.track_widget(alerts_frame)
+            self.theme_manager.track_widget(header_frame)
+            self.theme_manager.track_widget(header_icon, "label")
+            self.theme_manager.track_widget(header_label, "label")
+            self.theme_manager.track_widget(alerts_container)
+            self.theme_manager.track_widget(self.alerts_list_frame)
+
+    def add_alert(self, message):
+        """Override the original add_alert method with our styled version"""
+        # Detect alert type based on message content
+        if "Error" in message or "Failed" in message or "failed" in message:
+            alert_type = "error"
+        elif "Warning" in message or "disconnect" in message or "Disconnect" in message:
+            alert_type = "warning"
+        elif "success" in message or "Success" in message or "connected" in message or "Connected" in message:
+            alert_type = "success"
+        elif "client" in message or "Client" in message:
+            alert_type = "client"
+        else:
+            alert_type = "info"
+        
+        # Add to alerts display
+        self.add_styled_alert(message, alert_type)
+        
+        # Maintain original alerts box if it exists (for compatibility)
+        if hasattr(self, 'alerts_box') and isinstance(self.alerts_box, tk.Listbox):
+            timestamp = time.strftime("%H:%M:%S", time.localtime())
+            alert_text = f"[{timestamp}] {message}"
+            
+            # Add new alert at the top
+            self.alerts_box.insert(0, alert_text)
+            
+            # Keep only the 5 most recent alerts
+            if self.alerts_box.size() > 5:
+                self.alerts_box.delete(5, tk.END)
+
+    def add_styled_alert(self, message, alert_type="info"):
+        """Add a stylized alert to the alerts display"""
+        theme = self.THEMES[self.current_theme]
+        
+        # Maximum alerts to display
+        max_alerts = 5
+        
+        # Get timestamp
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        
+        # Get icon and color based on alert type
+        icons = {
+            "info": "ℹ️",
+            "warning": "⚠️",
+            "error": "❌",
+            "success": "✅",
+            "client": "👤"
+        }
+        
+        colors = {
+            "info": theme["fg_color"],
+            "warning": theme["warning_color"],
+            "error": theme["danger_color"],
+            "success": theme["success_color"],
+            "client": theme["info_color"]
+        }
+        
+        # Create alert item frame
+        alert_frame = ctk.CTkFrame(
+            self.alerts_list_frame,
+            fg_color=self._adjust_transparency(theme["card_color"], 0.7),
+            corner_radius=6,
+            height=36
+        )
+        alert_frame.pack(fill=tk.X, pady=4, padx=2)
+        alert_frame.pack_propagate(False)  # Keep fixed height
+        
+        # Add icon
+        icon_label = ctk.CTkLabel(
+            alert_frame,
+            text=icons.get(alert_type, "ℹ️"),
+            font=ctk.CTkFont(size=16),
+            width=25,
+            text_color=colors.get(alert_type, theme["fg_color"])
+        )
+        icon_label.pack(side=tk.LEFT, padx=(8, 2))
+        
+        # Add message
+        message_label = ctk.CTkLabel(
+            alert_frame,
+            text=message,
+            font=ctk.CTkFont(size=11),
+            text_color=theme["fg_color"],
+            anchor="w",
+            justify="left"
+        )
+        message_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        
+        # Add timestamp
+        time_label = ctk.CTkLabel(
+            alert_frame,
+            text=timestamp,
+            font=ctk.CTkFont(size=10),
+            text_color=self._adjust_transparency(theme["fg_color"], 0.7),
+            width=50
+        )
+        time_label.pack(side=tk.RIGHT, padx=(2, 8))
+        
+        # Store alert data
+        alert_data = {
+            'frame': alert_frame,
+            'icon': icon_label,
+            'message': message_label,
+            'time': time_label,
+            'type': alert_type,
+            'timestamp': time.time()
+        }
+        
+        # Add to alerts list
+        self.alerts_items.insert(0, alert_data)
+        
+        # Limit to max alerts
+        if len(self.alerts_items) > max_alerts:
+            # Remove oldest alert
+            old_alert = self.alerts_items.pop()
+            if old_alert and 'frame' in old_alert:
+                old_alert['frame'].destroy()
+        
+        # Register with theme manager
+        if hasattr(self, 'theme_manager'):
+            self.theme_manager.track_widget(alert_frame)
+            self.theme_manager.track_widget(icon_label, "label")
+            self.theme_manager.track_widget(message_label, "label")
+            self.theme_manager.track_widget(time_label, "label")
+
     def update_dashboard_theme(self):
         """Update dashboard elements to match the current theme"""
         if not hasattr(self, 'THEMES') or not hasattr(self, 'current_theme'):
             return
-            
+        
         theme = self.THEMES[self.current_theme]
         
         # Update performance metrics
+        self.update_performance_metrics_theme(theme)
+        
+        # Update text elements and logs
+        self.update_text_elements_theme(theme)
+        
+        # Update client map
+        self.update_client_map_theme(theme)
+        
+        # Update alerts
+        self.update_alerts_theme(theme)
+        
+        # Update summary cards
+        self.update_summary_cards_theme(theme)
+
+    def update_performance_metrics_theme(self, theme):
+        """Update performance metrics elements with theme colors"""
+        # CPU progress bar
         if hasattr(self, 'cpu_progress'):
             self.cpu_progress.configure(
                 progress_color=theme["accent_color"],
-                fg_color=theme["bg_color"],
-                border_color=theme["border_color"] if "border_color" in theme else None,
-                border_width=1 if "border_color" in theme else 0,
-                corner_radius=0  # Square for brutalist look
+                fg_color=self._adjust_transparency(theme["bg_color"], 0.5),
+                border_width=0,
+                corner_radius=6
             )
         
+        # Memory progress bar
         if hasattr(self, 'memory_progress'):
             self.memory_progress.configure(
                 progress_color=theme["info_color"],
-                fg_color=theme["bg_color"],
-                border_color=theme["border_color"] if "border_color" in theme else None,
-                border_width=1 if "border_color" in theme else 0,
-                corner_radius=0  # Square for brutalist look
+                fg_color=self._adjust_transparency(theme["bg_color"], 0.5),
+                border_width=0,
+                corner_radius=6
             )
         
-        # Update log text colors
+        # CPU and memory value labels
+        if hasattr(self, 'cpu_value'):
+            self.cpu_value.configure(text_color=theme["accent_color"])
+        
+        if hasattr(self, 'memory_value'):
+            self.memory_value.configure(text_color=theme["info_color"])
+        
+        if hasattr(self, 'network_value'):
+            self.network_value.configure(text_color=theme["success_color"])
+
+    def update_text_elements_theme(self, theme):
+        """Update text display elements with theme colors"""
+        # Log text
         if hasattr(self, 'log_text'):
             self.log_text.configure(
-                background=theme["input_bg"] if "input_bg" in theme else theme["bg_color"],
+                background=self._adjust_transparency(theme["bg_color"], 0.5),
                 foreground=theme["fg_color"]
             )
             # Update log tags
@@ -18019,459 +19544,128 @@ class RATServerGUI:
             self.log_text.tag_configure("success", foreground=theme["success_color"])
             self.log_text.tag_configure("client", foreground=theme["info_color"])
         
-        # Update alerts listbox
-        if hasattr(self, 'alerts_box'):
-            self.alerts_box.configure(
-                bg=theme["input_bg"] if "input_bg" in theme else theme["bg_color"],
-                fg=theme["fg_color"],
-                selectbackground=theme["accent_color"],
-                selectforeground="#000000"  # Black text for selected items
-            )
-        
-        # Update server status indicator
-        if hasattr(self, 'server_status_value'):
-            current_text = self.server_status_value.cget("text")
-            if current_text == "Online":
-                self.server_status_value.configure(text_color=theme["success_color"])
-            else:
-                self.server_status_value.configure(text_color=theme["danger_color"])
-        
-        # Update mini map frame
-        if hasattr(self, 'mini_map_frame'):
-            self.mini_map_frame.configure(
-                fg_color=theme["input_bg"] if "input_bg" in theme else theme["bg_color"],
-                border_color=theme["border_color"] if "border_color" in theme else None,
-                border_width=1 if "border_color" in theme else 0,
-                corner_radius=0  # Square for brutalist look
+        # Server status indicator in header
+        if hasattr(self, 'server_status_light') and hasattr(self, 'server_status_label'):
+            is_online = self.server_status_label.cget("text") == "Server Online"
+            self.server_status_light.configure(
+                text_color=theme["success_color"] if is_online else theme["danger_color"]
             )
 
-    def setup_dashboard(self):
-        """Set up an enhanced dashboard with modern metrics and visual elements"""
-        # Get theme colors
-        theme = self.THEMES[self.current_theme]
-        
-        # Create a grid layout for better organization
-        dashboard_left = ctk.CTkFrame(self.dashboard_frame, fg_color="transparent")
-        dashboard_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=10)
-        
-        dashboard_right = ctk.CTkFrame(self.dashboard_frame, fg_color="transparent")
-        dashboard_right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=10)
-        
-        # ===== LEFT COLUMN =====
-        # Server Status Card with enhanced information
-        status_frame = ctk.CTkFrame(dashboard_left, 
-                                fg_color=theme["card_color"], 
-                                corner_radius=0,  # Square corners
-                                border_color=theme["border_color"] if "border_color" in theme else None,
-                                border_width=1 if "border_color" in theme else 0)
-        status_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        status_header = ctk.CTkLabel(status_frame, text="SERVER STATUS", # All caps for brutalist look
-                                    font=ctk.CTkFont(family=FONT_STYLES["subheading"][0], 
-                                                    size=FONT_STYLES["subheading"][1], 
-                                                    weight=FONT_STYLES["subheading"][2]),
-                                    text_color=theme["fg_color"])
-        status_header.pack(anchor="w", padx=15, pady=10)
-        
-        # Status indicators with better layout and icons (using text placeholders for icons)
-        indicators_frame = ctk.CTkFrame(status_frame, fg_color="transparent")
-        indicators_frame.pack(fill=tk.X, padx=15, pady=5)
-        
-        # Server status with icon indicator
-        server_status_row = ctk.CTkFrame(indicators_frame, fg_color="transparent")
-        server_status_row.pack(fill=tk.X, pady=3)
-        
-        server_icon = ctk.CTkLabel(server_status_row, text="🖥️", width=30, 
-                                font=ctk.CTkFont(size=16))
-        server_icon.pack(side=tk.LEFT, padx=5)
-        
-        server_status_label = ctk.CTkLabel(server_status_row, text="Server Status:", 
-                                        font=ctk.CTkFont(weight="bold"), width=100)
-        server_status_label.pack(side=tk.LEFT, padx=5)
-        
-        self.server_status_value = ctk.CTkLabel(server_status_row, text="Offline", 
-                                            text_color=theme["danger_color"])
-        self.server_status_value.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        # Server address with icon
-        address_row = ctk.CTkFrame(indicators_frame, fg_color="transparent")
-        address_row.pack(fill=tk.X, pady=3)
-        
-        address_icon = ctk.CTkLabel(address_row, text="🌐", width=30, 
-                                font=ctk.CTkFont(size=16))
-        address_icon.pack(side=tk.LEFT, padx=5)
-        
-        address_label = ctk.CTkLabel(address_row, text="IP Address:", 
-                                font=ctk.CTkFont(weight="bold"), width=100)
-        address_label.pack(side=tk.LEFT, padx=5)
-        
-        self.server_address_value = ctk.CTkLabel(address_row, text=f"{self.ip}:{self.port}")
-        self.server_address_value.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        # Active clients with icon
-        clients_row = ctk.CTkFrame(indicators_frame, fg_color="transparent")
-        clients_row.pack(fill=tk.X, pady=3)
-        
-        clients_icon = ctk.CTkLabel(clients_row, text="👥", width=30, 
-                                font=ctk.CTkFont(size=16))
-        clients_icon.pack(side=tk.LEFT, padx=5)
-        
-        clients_label = ctk.CTkLabel(clients_row, text="Active Clients:", 
-                                font=ctk.CTkFont(weight="bold"), width=100)
-        clients_label.pack(side=tk.LEFT, padx=5)
-        
-        self.clients_value = ctk.CTkLabel(clients_row, text="0")
-        self.clients_value.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        # Uptime with icon
-        uptime_row = ctk.CTkFrame(indicators_frame, fg_color="transparent")
-        uptime_row.pack(fill=tk.X, pady=3)
-        
-        uptime_icon = ctk.CTkLabel(uptime_row, text="⏱️", width=30, 
-                                font=ctk.CTkFont(size=16))
-        uptime_icon.pack(side=tk.LEFT, padx=5)
-        
-        uptime_label = ctk.CTkLabel(uptime_row, text="Uptime:", 
-                                font=ctk.CTkFont(weight="bold"), width=100)
-        uptime_label.pack(side=tk.LEFT, padx=5)
-        
-        self.uptime_value = ctk.CTkLabel(uptime_row, text="00:00:00")
-        self.uptime_value.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        # Start uptime timer if server is running
-        self.start_time = None
-        self.uptime_timer_active = False
-        
-        # Quick Actions Card with brutalist styling
-        actions_frame = ctk.CTkFrame(dashboard_left, 
-                                fg_color=theme["card_color"], 
-                                corner_radius=0,  # Square corners
-                                border_color=theme["border_color"] if "border_color" in theme else None,
-                                border_width=1 if "border_color" in theme else 0)
-        actions_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        actions_header = ctk.CTkLabel(actions_frame, text="QUICK ACTIONS",  # All caps
-                                    font=ctk.CTkFont(family=FONT_STYLES["subheading"][0], 
-                                                    size=FONT_STYLES["subheading"][1], 
-                                                    weight=FONT_STYLES["subheading"][2]),
-                                    text_color=theme["fg_color"])
-        actions_header.pack(anchor="w", padx=15, pady=10)
-        
-        # Create a grid of action buttons
-        actions_grid = ctk.CTkFrame(actions_frame, fg_color="transparent")
-        actions_grid.pack(fill=tk.X, padx=15, pady=5)
-        
-        # Store action buttons for theme updates
-        self.action_buttons = []
-        
-        # Row 1
-        action_row1 = ctk.CTkFrame(actions_grid, fg_color="transparent")
-        action_row1.pack(fill=tk.X, pady=5)
-        
-        refresh_btn = ctk.CTkButton(action_row1, text="REFRESH CLIENTS",  # All caps
-                                image=self.load_icon_placeholder("refresh"),
-                                command=self.refresh_clients,
-                                fg_color=theme["button_color"],
-                                hover_color=theme["hover_color"],
-                                text_color=theme["fg_color"],
-                                border_color=theme["border_color"] if "border_color" in theme else None,
-                                border_width=1 if "border_color" in theme else 0,
-                                corner_radius=0,  # Square for brutalist look
-                                compound="left")
-        refresh_btn.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self.action_buttons.append(refresh_btn)
-        
-        disconnect_all_btn = ctk.CTkButton(action_row1, text="DISCONNECT ALL",  # All caps
-                                        image=self.load_icon_placeholder("disconnect"),
-                                        command=self.disconnect_all,
-                                        fg_color=theme["button_color"],
-                                        hover_color=theme["hover_color"],
-                                        text_color=theme["fg_color"],
-                                        border_color=theme["border_color"] if "border_color" in theme else None,
-                                        border_width=1 if "border_color" in theme else 0,
-                                        corner_radius=0,  # Square for brutalist look
-                                        compound="left")
-        disconnect_all_btn.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self.action_buttons.append(disconnect_all_btn)
-        
-        # Row 2 
-        action_row2 = ctk.CTkFrame(actions_grid, fg_color="transparent")
-        action_row2.pack(fill=tk.X, pady=5)
-        
-        screen_btn = ctk.CTkButton(action_row2, text="SCREEN CAPTURE",  # All caps
-                                image=self.load_icon_placeholder("screen"),
-                                command=self.quick_screen_capture,
-                                fg_color=theme["button_color"],
-                                hover_color=theme["hover_color"],
-                                text_color=theme["fg_color"],
-                                border_color=theme["border_color"] if "border_color" in theme else None,
-                                border_width=1 if "border_color" in theme else 0,
-                                corner_radius=0,  # Square for brutalist look
-                                compound="left")
-        screen_btn.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self.action_buttons.append(screen_btn)
-        
-        shell_btn = ctk.CTkButton(action_row2, text="COMMAND SHELL",  # All caps
-                                image=self.load_icon_placeholder("terminal"),
-                                command=self.quick_command_shell,
-                                fg_color=theme["button_color"],
-                                hover_color=theme["hover_color"],
-                                text_color=theme["fg_color"],
-                                border_color=theme["border_color"] if "border_color" in theme else None,
-                                border_width=1 if "border_color" in theme else 0,
-                                corner_radius=0,  # Square for brutalist look
-                                compound="left")
-        shell_btn.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        self.action_buttons.append(shell_btn)
-        
-        # Activity Log with enhanced styling
-        log_frame = ctk.CTkFrame(dashboard_left, 
-                            fg_color=theme["card_color"], 
-                            corner_radius=0,  # Square corners
-                            border_color=theme["border_color"] if "border_color" in theme else None,
-                            border_width=1 if "border_color" in theme else 0)
-        log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        log_header = ctk.CTkLabel(log_frame, text="ACTIVITY LOG",  # All caps
-                            font=ctk.CTkFont(family=FONT_STYLES["subheading"][0], 
-                                            size=FONT_STYLES["subheading"][1], 
-                                            weight=FONT_STYLES["subheading"][2]),
-                            text_color=theme["fg_color"])
-        log_header.pack(anchor="w", padx=15, pady=10)
-        
-        # Control buttons for log
-        log_controls = ctk.CTkFrame(log_frame, fg_color="transparent")
-        log_controls.pack(fill=tk.X, padx=15, pady=0)
-        
-        clear_log_btn = ctk.CTkButton(log_controls, text="CLEAR LOG",  # All caps
-                                    command=self.clear_activity_log,
-                                    fg_color=theme["button_color"],
-                                    hover_color=theme["hover_color"],
-                                    text_color=theme["fg_color"],
-                                    border_color=theme["border_color"] if "border_color" in theme else None,
-                                    border_width=1 if "border_color" in theme else 0,
-                                    width=80, height=28,
-                                    corner_radius=0)  # Square for brutalist look
-        clear_log_btn.pack(side=tk.LEFT, padx=5)
-        self.action_buttons.append(clear_log_btn)
-        
-        save_log_btn = ctk.CTkButton(log_controls, text="SAVE LOG",  # All caps
-                                command=self.save_activity_log,
-                                fg_color=theme["button_color"],
-                                hover_color=theme["hover_color"],
-                                text_color=theme["fg_color"],
-                                border_color=theme["border_color"] if "border_color" in theme else None,
-                                border_width=1 if "border_color" in theme else 0,
-                                width=80, height=28,
-                                corner_radius=0)  # Square for brutalist look
-        save_log_btn.pack(side=tk.LEFT, padx=5)
-        self.action_buttons.append(save_log_btn)
-        
-        # Enhanced log with colored tags for different event types
-        self.log_text = scrolledtext.ScrolledText(log_frame, wrap=tk.WORD, 
-                                            background=theme["input_bg"] if "input_bg" in theme else theme["bg_color"], 
-                                            foreground=theme["fg_color"], 
-                                            height=15, 
-                                            borderwidth=0,
-                                            highlightthickness=1,
-                                            highlightbackground=theme["border_color"] if "border_color" in theme else theme["accent_color"],
-                                            font=("Consolas", 9))
-        self.log_text.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
-        self.log_text.configure(state="disabled")
-        
-        # Configure tags for different log levels
-        self.log_text.tag_configure("info", foreground=theme["fg_color"])
-        self.log_text.tag_configure("warning", foreground=theme["warning_color"])
-        self.log_text.tag_configure("error", foreground=theme["danger_color"])
-        self.log_text.tag_configure("success", foreground=theme["success_color"])
-        self.log_text.tag_configure("client", foreground=theme["info_color"])
-        
-        # ===== RIGHT COLUMN =====
-        # System Performance Card
-        performance_frame = ctk.CTkFrame(dashboard_right, 
-                                    fg_color=theme["card_color"], 
-                                    corner_radius=0,  # Square corners
-                                    border_color=theme["border_color"] if "border_color" in theme else None,
-                                    border_width=1 if "border_color" in theme else 0)
-        performance_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        performance_header = ctk.CTkLabel(performance_frame, text="SYSTEM PERFORMANCE",  # All caps
-                                        font=ctk.CTkFont(family=FONT_STYLES["subheading"][0], 
-                                                        size=FONT_STYLES["subheading"][1], 
-                                                        weight=FONT_STYLES["subheading"][2]),
-                                        text_color=theme["fg_color"])
-        performance_header.pack(anchor="w", padx=15, pady=10)
-        
-        # CPU usage with brutalist styling
-        cpu_frame = ctk.CTkFrame(performance_frame, fg_color="transparent")
-        cpu_frame.pack(fill=tk.X, padx=15, pady=5)
-        
-        cpu_label = ctk.CTkLabel(cpu_frame, text="CPU Usage:", 
-                            font=ctk.CTkFont(weight="bold"), width=100,
-                            text_color=theme["fg_color"])
-        cpu_label.pack(side=tk.LEFT, padx=5)
-        
-        self.cpu_value = ctk.CTkLabel(cpu_frame, text="0%", width=50,
-                                text_color=theme["fg_color"])
-        self.cpu_value.pack(side=tk.LEFT, padx=5)
-        
-        self.cpu_progress = ctk.CTkProgressBar(cpu_frame, width=150, height=20,  # Taller bar
-                                            progress_color=theme["accent_color"],
-                                            fg_color=theme["bg_color"],
-                                            border_color=theme["border_color"] if "border_color" in theme else None,
-                                            border_width=1 if "border_color" in theme else 0,
-                                            corner_radius=0)  # Square corners
-        self.cpu_progress.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
-        self.cpu_progress.set(0)
-        
-        # Memory usage with brutalist styling
-        memory_frame = ctk.CTkFrame(performance_frame, fg_color="transparent")
-        memory_frame.pack(fill=tk.X, padx=15, pady=5)
-        
-        memory_label = ctk.CTkLabel(memory_frame, text="Memory Usage:", 
-                                font=ctk.CTkFont(weight="bold"), width=100,
-                                text_color=theme["fg_color"])
-        memory_label.pack(side=tk.LEFT, padx=5)
-        
-        self.memory_value = ctk.CTkLabel(memory_frame, text="0%", width=50,
-                                    text_color=theme["fg_color"])
-        self.memory_value.pack(side=tk.LEFT, padx=5)
-        
-        self.memory_progress = ctk.CTkProgressBar(memory_frame, width=150, height=20,  # Taller bar
-                                                progress_color=theme["info_color"],
-                                                fg_color=theme["bg_color"],
-                                                border_color=theme["border_color"] if "border_color" in theme else None,
-                                                border_width=1 if "border_color" in theme else 0,
-                                                corner_radius=0)  # Square corners
-        self.memory_progress.pack(side=tk.LEFT, padx=10, fill=tk.X, expand=True)
-        self.memory_progress.set(0)
-        
-        # Network usage
-        network_frame = ctk.CTkFrame(performance_frame, fg_color="transparent")
-        network_frame.pack(fill=tk.X, padx=15, pady=5)
-        
-        network_label = ctk.CTkLabel(network_frame, text="Network I/O:", 
-                                font=ctk.CTkFont(weight="bold"), width=100,
-                                text_color=theme["fg_color"])
-        network_label.pack(side=tk.LEFT, padx=5)
-        
-        self.network_value = ctk.CTkLabel(network_frame, text="0 KB/s", width=150,
-                                   text_color=theme["fg_color"])
-        self.network_value.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
-        
-        # Clients Overview (Mini map) with brutalist styling
-        clients_overview_frame = ctk.CTkFrame(dashboard_right, 
-                                        fg_color=theme["card_color"], 
-                                        corner_radius=0,  # Square corners
-                                        border_color=theme["border_color"] if "border_color" in theme else None,
-                                        border_width=1 if "border_color" in theme else 0)
-        clients_overview_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        clients_header = ctk.CTkLabel(clients_overview_frame, text="CLIENTS OVERVIEW",  # All caps
-                                font=ctk.CTkFont(family=FONT_STYLES["subheading"][0], 
-                                                size=FONT_STYLES["subheading"][1], 
-                                                weight=FONT_STYLES["subheading"][2]),
-                                text_color=theme["fg_color"])
-        clients_header.pack(anchor="w", padx=15, pady=10)
-        
-        # Create a mini world map (placeholder) with brutalist styling
-        self.mini_map_frame = ctk.CTkFrame(clients_overview_frame, 
-                                        fg_color=theme["input_bg"] if "input_bg" in theme else theme["bg_color"], 
-                                        height=200, 
-                                        border_color=theme["border_color"] if "border_color" in theme else None,
-                                        border_width=1 if "border_color" in theme else 0,
-                                        corner_radius=0)  # Square corners
-        self.mini_map_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 10))
-        
-        # Add a placeholder text that will be replaced with actual map
-        map_label = ctk.CTkLabel(self.mini_map_frame, 
-                            text="Client locations will be displayed here\nwhen Geo Mapping module is activated",
-                            font=ctk.CTkFont(size=12),
-                            text_color=theme["fg_color"])
-        map_label.pack(fill=tk.BOTH, expand=True)
-        
-        # Recent Events / Alerts Card with brutalist styling
-        alerts_frame = ctk.CTkFrame(dashboard_right, 
-                                fg_color=theme["card_color"], 
-                                corner_radius=0,  # Square corners
-                                border_color=theme["border_color"] if "border_color" in theme else None,
-                                border_width=1 if "border_color" in theme else 0)
-        alerts_frame.pack(fill=tk.X, padx=10, pady=10)
-        
-        alerts_header = ctk.CTkLabel(alerts_frame, text="RECENT ALERTS",  # All caps
-                                font=ctk.CTkFont(family=FONT_STYLES["subheading"][0], 
-                                                size=FONT_STYLES["subheading"][1], 
-                                                weight=FONT_STYLES["subheading"][2]),
-                                text_color=theme["fg_color"])
-        alerts_header.pack(anchor="w", padx=15, pady=10)
-        
-        # Create a listbox for alerts with brutalist styling
-        self.alerts_box = tk.Listbox(alerts_frame, 
-                                bg=theme["input_bg"] if "input_bg" in theme else theme["bg_color"], 
-                                fg=theme["fg_color"],
-                                selectbackground=theme["accent_color"],
-                                selectforeground="#000000",  # Black text for contrast on selection
-                                highlightthickness=1,
-                                highlightbackground=theme["border_color"] if "border_color" in theme else theme["accent_color"],
-                                borderwidth=0,
-                                height=4,
-                                font=("Consolas", 9))  # Monospace font for tech feel
-        self.alerts_box.pack(fill=tk.BOTH, padx=15, pady=(0, 10))
-        
-        # Add some initial alerts
-        self.alerts_box.insert(tk.END, "Server ready - No active alerts")
-        
-        # Start performance monitoring thread
-        self.start_performance_monitoring()
-        
-        # Register new widgets with theme manager
-        if hasattr(self, 'theme_manager'):
-            # First track all frames
-            self.theme_manager.track_widget(status_frame)
-            self.theme_manager.track_widget(actions_frame)
-            self.theme_manager.track_widget(log_frame)
-            self.theme_manager.track_widget(performance_frame)
-            self.theme_manager.track_widget(clients_overview_frame)
-            self.theme_manager.track_widget(alerts_frame)
+    def update_client_map_theme(self, theme):
+        """Update client map with theme colors"""
+        if hasattr(self, 'mini_map_frame') and isinstance(self.mini_map_frame, ctk.CTkCanvas):
+            self.mini_map_frame.configure(
+                bg=self._adjust_transparency(theme["bg_color"], 0.5)
+            )
             
-            # Then track all labels
-            self.theme_manager.track_widget(status_header, "label")
-            self.theme_manager.track_widget(actions_header, "label")
-            self.theme_manager.track_widget(log_header, "label")
-            self.theme_manager.track_widget(performance_header, "label")
-            self.theme_manager.track_widget(clients_header, "label")
-            self.theme_manager.track_widget(alerts_header, "label")
+            # Redraw the map elements
+            self.mini_map_frame.delete("all")
+            self.draw_world_map()
             
-            # Track status labels
-            self.theme_manager.track_widget(server_status_label, "label")
-            self.theme_manager.track_widget(self.server_status_value, "label")
-            self.theme_manager.track_widget(address_label, "label")
-            self.theme_manager.track_widget(self.server_address_value, "label")
-            self.theme_manager.track_widget(clients_label, "label")
-            self.theme_manager.track_widget(self.clients_value, "label")
-            self.theme_manager.track_widget(uptime_label, "label")
-            self.theme_manager.track_widget(self.uptime_value, "label")
+            # Re-add the client dots
+            if hasattr(self, 'client_dots'):
+                for client in self.client_dots:
+                    x, y = client['location']
+                    client_id = client['id']
+                    
+                    # Recreate main dot
+                    dot = self.mini_map_frame.create_oval(
+                        x-6, y-6, x+6, y+6,
+                        fill=theme["accent_color"],
+                        outline=theme["fg_color"],
+                        width=1,
+                        tags=f"client_{client_id}"
+                    )
+                    
+                    # Recreate pulse
+                    pulse = self.mini_map_frame.create_oval(
+                        x-12, y-12, x+12, y+12,
+                        fill="",
+                        outline=self._adjust_transparency(theme["accent_color"], 0.5),
+                        width=1,
+                        tags=f"pulse_{client_id}"
+                    )
+                    
+                    # Update client data
+                    client['dot'] = dot
+                    client['pulse'] = pulse
+                    
+                    # Restart animation
+                    self.animate_client_dot(client)
+
+    def update_alerts_theme(self, theme):
+        """Update alerts display with theme colors"""
+        # Update old alerts box if it exists
+        if hasattr(self, 'alerts_box') and isinstance(self.alerts_box, tk.Listbox):
+            self.alerts_box.configure(
+                bg=self._adjust_transparency(theme["bg_color"], 0.5),
+                fg=theme["fg_color"],
+                selectbackground=theme["accent_color"],
+                selectforeground="#FFFFFF"  # White text for selected items
+            )
+        
+        # Update new styled alerts
+        if hasattr(self, 'alerts_list_frame'):
+            self.alerts_list_frame.configure(
+                fg_color=self._adjust_transparency(theme["bg_color"], 0.5)
+            )
             
-            # Track performance metrics
-            self.theme_manager.track_widget(cpu_label, "label")
-            self.theme_manager.track_widget(self.cpu_value, "label")
-            self.theme_manager.track_widget(self.cpu_progress)
-            self.theme_manager.track_widget(memory_label, "label")
-            self.theme_manager.track_widget(self.memory_value, "label")
-            self.theme_manager.track_widget(self.memory_progress)
-            self.theme_manager.track_widget(network_label, "label")
-            self.theme_manager.track_widget(self.network_value, "label")
-            
-            # Track the mini map
-            self.theme_manager.track_widget(self.mini_map_frame)
-            self.theme_manager.track_widget(map_label, "label")
-            
-            # Track the log
-            self.theme_manager.track_widget(self.log_text, "scrolledtext")
-            
-            # Track all buttons
-            for btn in self.action_buttons:
-                self.theme_manager.track_widget(btn)
+            # Update individual alert items
+            if hasattr(self, 'alerts_items'):
+                for alert in self.alerts_items:
+                    if 'frame' in alert:
+                        alert['frame'].configure(
+                            fg_color=self._adjust_transparency(theme["card_color"], 0.7)
+                        )
+                    
+                    if 'icon' in alert and 'type' in alert:
+                        colors = {
+                            "info": theme["fg_color"],
+                            "warning": theme["warning_color"],
+                            "error": theme["danger_color"],
+                            "success": theme["success_color"],
+                            "client": theme["info_color"]
+                        }
+                        alert['icon'].configure(
+                            text_color=colors.get(alert['type'], theme["fg_color"])
+                        )
+                    
+                    if 'message' in alert:
+                        alert['message'].configure(text_color=theme["fg_color"])
+                    
+                    if 'time' in alert:
+                        alert['time'].configure(
+                            text_color=self._adjust_transparency(theme["fg_color"], 0.7)
+                        )
+
+    def update_summary_cards_theme(self, theme):
+        """Update summary cards with theme colors"""
+        if hasattr(self, 'summary_cards'):
+            for card_key, card in self.summary_cards.items():
+                # Determine accent color based on card type
+                if card_key == 'clients':
+                    accent_color = theme["info_color"]
+                elif card_key == 'uptime':
+                    accent_color = theme["success_color"]
+                elif card_key == 'cpu':
+                    accent_color = theme["accent_color"]
+                else:
+                    accent_color = theme["accent_color"]
+                
+                # Update icon color
+                if hasattr(card, 'icon_label'):
+                    card.icon_label.configure(text_color=accent_color)
+                
+                # Update title label
+                if hasattr(card, 'title_label'):
+                    card.title_label.configure(text_color=theme["fg_color"])
+                
+                # Update value label
+                if hasattr(card, 'value_label'):
+                    card.value_label.configure(text_color=theme["fg_color"])
+                
+                # Store accent color for future reference
+                card.accent_color = accent_color
 
     def update_dashboard_buttons(self):
         """Update all dashboard buttons to match the current theme"""
@@ -18479,22 +19673,82 @@ class RATServerGUI:
             theme = self.THEMES[self.current_theme]
             
             for btn in self.action_buttons:
-                # Check if this is an accent button or regular button
-                current_fg = btn.cget("fg_color")
-                
-                # Default is regular button styling
-                new_fg = theme["button_color"]
-                new_text_color = theme["fg_color"]
-                
-                # Apply updated styling
+                # Default is regular button styling with modern look
                 btn.configure(
-                    fg_color=new_fg,
-                    hover_color=theme["hover_color"],
-                    text_color=new_text_color,
-                    border_color=theme["border_color"] if "border_color" in theme else None,
-                    border_width=1 if "border_color" in theme else 0,
-                    corner_radius=0  # Ensure square corners for brutalist look
+                    fg_color=theme["card_color"],
+                    hover_color=self._lighten_color(theme["card_color"]) if "Dark" in self.current_theme else self._darken_color(theme["card_color"]),
+                    text_color=theme["fg_color"],
+                    border_width=1,
+                    border_color=theme["border_color"] if "border_color" in theme else self._lighten_color(theme["card_color"]),
+                    corner_radius=8
                 )
+                
+                # Update icon color if the button has an icon label
+                if hasattr(btn, 'icon_label'):
+                    btn.icon_label.configure(text_color=theme["accent_color"])
+
+    def _lighten_color(self, hex_color, amount=0.1):
+        """Lighten a hex color by the specified amount"""
+        import colorsys
+        
+        # Convert hex to RGB
+        hex_color = hex_color.lstrip('#')
+        r, g, b = tuple(int(hex_color[i:i+2], 16) / 255 for i in (0, 2, 4))
+        
+        # Convert RGB to HSV
+        h, s, v = colorsys.rgb_to_hsv(r, g, b)
+        
+        # Increase brightness (value)
+        v = min(1.0, v + amount)
+        
+        # Convert back to RGB
+        r, g, b = colorsys.hsv_to_rgb(h, s, v)
+        
+        # Convert back to hex
+        return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+
+    def _darken_color(self, hex_color, amount=0.1):
+        """Darken a hex color by the specified amount"""
+        import colorsys
+        
+        # Convert hex to RGB
+        hex_color = hex_color.lstrip('#')
+        r, g, b = tuple(int(hex_color[i:i+2], 16) / 255 for i in (0, 2, 4))
+        
+        # Convert RGB to HSV
+        h, s, v = colorsys.rgb_to_hsv(r, g, b)
+        
+        # Decrease brightness (value)
+        v = max(0.0, v - amount)
+        
+        # Convert back to RGB
+        r, g, b = colorsys.hsv_to_rgb(h, s, v)
+        
+        # Convert back to hex
+        return f"#{int(r*255):02x}{int(g*255):02x}{int(b*255):02x}"
+
+    def _adjust_transparency(self, hex_color, alpha=0.5):
+        """Adjust the transparency of a color for a glass-like effect"""
+        # Get the theme
+        theme = self.THEMES[self.current_theme]
+        
+        # Determine a suitable background color to blend with
+        bg_color = theme["bg_color"]
+        
+        # Convert hex to RGB
+        hex_color = hex_color.lstrip('#')
+        r1, g1, b1 = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        
+        bg_color = bg_color.lstrip('#')
+        r2, g2, b2 = tuple(int(bg_color[i:i+2], 16) for i in (0, 2, 4))
+        
+        # Blend the colors based on alpha
+        r = int(r1 * alpha + r2 * (1 - alpha))
+        g = int(g1 * alpha + g2 * (1 - alpha))
+        b = int(b1 * alpha + b2 * (1 - alpha))
+        
+        # Convert back to hex
+        return f"#{r:02x}{g:02x}{b:02x}"
         
 
 
@@ -20391,7 +21645,7 @@ class RATServerGUI:
         self.performance_after_id = self.root.after(1000, self.update_performance_metrics)
 
     def update_uptime(self):
-        """Update the uptime display"""
+        """Update the uptime display for both old and new dashboard"""
         if self.start_time is not None:
             current_time = time.time()
             uptime_seconds = int(current_time - self.start_time)
@@ -20401,7 +21655,13 @@ class RATServerGUI:
             minutes, seconds = divmod(remainder, 60)
             uptime_str = f"{hours:02}:{minutes:02}:{seconds:02}"
             
-            self.uptime_value.configure(text=uptime_str)
+            # Update value in old dashboard
+            if hasattr(self, 'uptime_value'):
+                self.uptime_value.configure(text=uptime_str)
+            
+            # Update summary card in new dashboard
+            if hasattr(self, 'summary_cards') and 'uptime' in self.summary_cards:
+                self.summary_cards['uptime'].value_label.configure(text=uptime_str)
             
     # Server operations
     def start_server_gui(self):
@@ -20433,12 +21693,28 @@ class RATServerGUI:
                 # Start uptime tracking
                 self.start_time = time.time()
                 
-                # Update UI
-                self.server_status_value.configure(text="Online", text_color=self.THEMES[self.current_theme]["success_color"])
-                self.server_address_value.configure(text=f"{self.address[0]}:{self.address[1]}")
+                # Update UI with proper status indicators
+                if hasattr(self, 'server_status_value'):
+                    self.server_status_value.configure(text="Online", text_color=self.THEMES[self.current_theme]["success_color"])
+                if hasattr(self, 'server_address_value'):
+                    self.server_address_value.configure(text=f"{self.address[0]}:{self.address[1]}")
+                
+                # Update modern dashboard indicators
+                if hasattr(self, 'server_status_label'):
+                    self.server_status_label.configure(text="Server Online")
+                if hasattr(self, 'server_address_label'):
+                    self.server_address_label.configure(text=f"{self.address[0]}:{self.address[1]}")
+                if hasattr(self, 'server_status_light'):
+                    self.server_status_light.configure(text_color=self.THEMES[self.current_theme]["success_color"])
+                
+                # Update sidebar indicator
+                self.update_server_status_indicator(is_running=True)
+                
+                # Log the server start
                 self.log(f"Server is now running on {self.address[0]}:{self.address[1]}", log_type="success")
                 self.add_alert("Server started successfully")
                 
+                # Start accepting clients
                 threading.Thread(target=self.accept_clients, daemon=True).start()
                 
             except (ConnectionError, ConnectionResetError, ConnectionRefusedError) as err:
@@ -20448,8 +21724,9 @@ class RATServerGUI:
                 messagebox.showerror("Connection Error", str(err))
         else:
             self.log("Server Already Running", log_type="warning")
-    
-    
+
+
+    # Fix stop_server method to update the proper status indicators
     def stop_server(self):
         """Enhanced version of stop_server with uptime reset"""
         try:
@@ -20461,7 +21738,8 @@ class RATServerGUI:
                 
                 # Reset uptime tracking
                 self.start_time = None
-                self.uptime_value.configure(text="00:00:00")
+                if hasattr(self, 'uptime_value'):
+                    self.uptime_value.configure(text="00:00:00")
                 
                 # Close all client connections
                 self.disconnect_all()
@@ -20471,10 +21749,24 @@ class RATServerGUI:
                     self.server_socket.close()
                     self.server_socket = None
                 
-                # Update UI
-                self.server_status_value.configure(text="Offline", text_color=self.THEMES[self.current_theme]["danger_color"])
+                # Update UI with proper status indicators
+                if hasattr(self, 'server_status_value'):
+                    self.server_status_value.configure(text="Offline", text_color=self.THEMES[self.current_theme]["danger_color"])
+                
+                # Update modern dashboard indicators
+                if hasattr(self, 'server_status_label'):
+                    self.server_status_label.configure(text="Server Offline")
+                if hasattr(self, 'server_status_light'):
+                    self.server_status_light.configure(text_color=self.THEMES[self.current_theme]["danger_color"])
+                
+                # Update sidebar indicator
+                self.update_server_status_indicator(is_running=False)
+                
+                # Update button states
                 self.start_server_btn.configure(state="normal")
                 self.stop_server_btn.configure(state="disabled")
+                
+                # Log the server stop
                 self.log("Server has been stopped", log_type="warning")
                 self.add_alert("Server stopped")
             else:
@@ -20484,19 +21776,6 @@ class RATServerGUI:
                 self.server_socket.close()
                 self.server_socket = None
             self.log(f"Server has been stopped due to an error: {e}", log_type="error")
-
-
-    def add_alert(self, message):
-        """Add a new alert to the alerts box"""
-        timestamp = time.strftime("%H:%M:%S", time.localtime())
-        alert_text = f"[{timestamp}] {message}"
-        
-        # Add new alert at the top
-        self.alerts_box.insert(0, alert_text)
-        
-        # Keep only the 5 most recent alerts
-        if self.alerts_box.size() > 5:
-            self.alerts_box.delete(5, tk.END)
  
     def quick_command_shell(self):
         """Quick access to command shell for selected client"""
@@ -20576,7 +21855,7 @@ class RATServerGUI:
                 self.clients[(addr[0], addr[1])] = (self.client_counter, conn)
                 self.client_counter += 1
                 
-                self.clients_value.configure(text=str(len(self.clients)))
+                # self.clients_value.configure(text=str(len(self.clients)))
                 
                 try:
                     hostname = self.getHostName(conn)
@@ -20608,7 +21887,7 @@ class RATServerGUI:
                 
             self.clients_tree.insert("", "end", values=(client_id, addr[0], addr[1], hostname, "Connected"))
         
-        self.clients_value.configure(text=str(len(self.clients)))
+        # self.clients_value.configure(text=str(len(self.clients)))
         self.log("Clients list refreshed")
     
     def connect_to_client(self):
@@ -20802,7 +22081,7 @@ class RATServerGUI:
         for item in self.clients_tree.get_children():
             self.clients_tree.delete(item)
         
-        self.clients_value.configure(text="0")
+        # self.clients_value.configure(text="0")
         self.log("All clients disconnected")
 
     
@@ -21594,3 +22873,4 @@ if __name__ == "__main__":
     # Start application
     app = RATServerGUI()
     app.run()
+    
